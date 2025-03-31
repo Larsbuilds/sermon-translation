@@ -7,6 +7,7 @@ export interface AudioAnalyzerConfig {
   smoothingTimeConstant?: number;
   minDecibels?: number;
   maxDecibels?: number;
+  sampleRate?: number;
 }
 
 export interface AudioAnalyzerResult {
@@ -21,13 +22,17 @@ export const setupAudioAnalyzer = (
   config: AudioAnalyzerConfig = {}
 ): AudioAnalyzerResult => {
   const {
-    fftSize = 256,
+    fftSize = 2048,
     smoothingTimeConstant = 0.8,
     minDecibels = -90,
-    maxDecibels = -10
+    maxDecibels = -10,
+    sampleRate = 44100
   } = config;
 
-  const audioContext = new AudioContext();
+  const audioContext = new AudioContext({
+    sampleRate,
+    latencyHint: 'interactive'
+  });
   const source = audioContext.createMediaStreamSource(stream);
   const analyser = audioContext.createAnalyser();
 
@@ -76,6 +81,12 @@ export const getAudioData = (
 export const cleanupAudioAnalyzer = (
   result: AudioAnalyzerResult
 ): void => {
-  result.source.disconnect();
-  result.audioContext.close();
+  try {
+    result.source.disconnect();
+    if (result.audioContext.state !== 'closed') {
+      result.audioContext.close();
+    }
+  } catch (error) {
+    console.warn('Error cleaning up audio analyzer:', error);
+  }
 }; 

@@ -36,15 +36,9 @@ export function SessionStatus({
           <p className="text-gray-600">Listeners: {session.listenerCount}</p>
         </div>
         <div className="text-right">
-          <p className="text-lg font-semibold">Time Remaining: {formatTime(timeRemaining)}</p>
-          <div className="space-x-2 mt-2">
-            <Button onClick={onExtendSession} variant="outline">
-              Extend Session
-            </Button>
-            <Button onClick={onEndSession} variant="destructive">
-              End Session
-            </Button>
-          </div>
+          <Button onClick={onEndSession} variant="destructive">
+            End Session
+          </Button>
         </div>
       </div>
     </Card>

@@ -34,6 +34,9 @@ export default function AudioCapture({
   const [isMuted, setIsMuted] = useState(false);
   const [audioQuality, setAudioQuality] = useState<AudioQualityMetrics | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
+  const [timeData, setTimeData] = useState<Uint8Array | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyzerRef = useRef<AnalyserNode | null>(null);
@@ -41,9 +44,86 @@ export default function AudioCapture({
   const animationFrameRef = useRef<number>();
   const chunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const isMountedRef = useRef(true);
 
   const currentSession = sessionId ? sessions.find(s => s.id === sessionId) : null;
-  const participants = currentSession?.listeners || 0;
+  const participants = currentSession?.listenerCount || 0;
+
+  // Add cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      cleanupAudioResources();
+    };
+  }, []);
+
+  // Add a new effect to handle initial microphone permission request
+  useEffect(() => {
+    const requestMicrophonePermission = async () => {
+      if (!isMountedRef.current) return;
+      
+      try {
+        setIsInitializing(true);
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100,
+            channelCount: 1
+          } 
+        });
+        
+        if (!isMountedRef.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+
+        // Store the stream for later use
+        mediaStreamRef.current = stream;
+        toast.success('Microphone access granted');
+      } catch (err) {
+        if (!isMountedRef.current) return;
+        
+        const error = err instanceof Error ? err : new Error('Failed to access microphone');
+        if (error.name === 'NotAllowedError') {
+          toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
+        } else if (error.name === 'NotFoundError') {
+          toast.error('No microphone found. Please connect a microphone and try again.');
+        } else {
+          toast.error('Failed to access microphone: ' + error.message);
+        }
+        setError(error);
+      } finally {
+        if (isMountedRef.current) {
+          setIsInitializing(false);
+        }
+      }
+    };
+
+    // Request microphone permission immediately when component mounts
+    requestMicrophonePermission();
+  }, []); // Empty dependency array means this runs once on mount
+
+  // Effect to handle audio recording state
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+
+    if (isActive) {
+      startRecording().catch(err => {
+        if (!isMountedRef.current) return;
+        console.error('Failed to start recording:', err);
+        onError?.(err);
+      });
+    } else {
+      cleanupAudioResources();
+    }
+
+    return () => {
+      if (!isMountedRef.current) return;
+      cleanupAudioResources();
+    };
+  }, [isActive]);
 
   const handleQuitCall = useCallback(() => {
     if (sessionId) {
@@ -52,38 +132,45 @@ export default function AudioCapture({
   }, [sessionId, endSession]);
 
   const cleanupAudioResources = useCallback(() => {
+    if (!isMountedRef.current) return;
+
     // Stop and cleanup MediaRecorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    }
+    mediaRecorderRef.current = null;
+
+    // Cleanup AudioContext
+    if (audioContextRef.current?.state !== 'closed') {
+      audioContextRef.current?.close();
+    }
+    audioContextRef.current = null;
+
+    // Cleanup analyzer
+    analyzerRef.current = null;
+
+    // Cleanup audio buffer
+    audioBufferRef.current = null;
+
+    // Cleanup media stream
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
     }
 
     // Cancel animation frame
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = undefined;
     }
 
-    // Close AudioContext if it exists and is not already closed
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      try {
-        audioContextRef.current.close();
-      } catch (err) {
-        console.warn('Error closing AudioContext:', err);
-      }
-    }
-
-    // Reset refs
-    mediaRecorderRef.current = null;
-    audioContextRef.current = null;
-    analyzerRef.current = null;
-    mediaStreamRef.current = null;
-    chunksRef.current = [];
-
-    // Reset state
+    // Reset states
     setIsRecording(false);
     setIsConnected(false);
-    setIsMuted(false);
-    setAudioQuality(null);
+    setFrequencyData(null);
+    setTimeData(null);
+    setError(null);
   }, []);
 
   const handleAudioQuality = (quality: AudioQualityMetrics) => {
@@ -103,21 +190,45 @@ export default function AudioCapture({
   };
 
   const startRecording = useCallback(async () => {
+    if (!isMountedRef.current) return;
+
     try {
+      setIsInitializing(true);
       // Cleanup any existing resources first
       cleanupAudioResources();
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      const mediaRecorder = new MediaRecorder(stream);
+      // Use existing stream if available, otherwise request new one
+      let stream = mediaStreamRef.current;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100,
+            channelCount: 1
+          } 
+        });
+        mediaStreamRef.current = stream;
+      }
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
       mediaRecorderRef.current = mediaRecorder;
 
       // Set up audio context and analyzer
-      const audioContext = new AudioContext();
+      const audioContext = new AudioContext({
+        sampleRate: 44100,
+        latencyHint: 'interactive'
+      });
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
       const analyzer = audioContext.createAnalyser();
       analyzer.fftSize = 2048;
+      analyzer.smoothingTimeConstant = 0.8;
+      analyzer.minDecibels = -90;
+      analyzer.maxDecibels = -10;
       analyzerRef.current = analyzer;
       source.connect(analyzer);
 
@@ -126,30 +237,56 @@ export default function AudioCapture({
 
       // Handle data available event
       mediaRecorder.ondataavailable = (event) => {
+        if (!isMountedRef.current) return;
         if (event.data.size > 0) {
           chunksRef.current.push(event.data);
         }
       };
 
+      // Handle errors from the media stream
+      stream.getAudioTracks().forEach(track => {
+        track.onended = () => {
+          if (!isMountedRef.current) return;
+          setIsConnected(false);
+          toast.error('Audio input device disconnected');
+        };
+        track.onmute = () => {
+          if (!isMountedRef.current) return;
+          setIsMuted(true);
+          toast.warning('Microphone muted');
+        };
+        track.onunmute = () => {
+          if (!isMountedRef.current) return;
+          setIsMuted(false);
+          toast.success('Microphone unmuted');
+        };
+      });
+
       // Start recording
       mediaRecorder.start(1000); // Collect data every second
       setIsRecording(true);
       setIsConnected(true);
+      toast.success('Recording started');
 
       // Start animation loop for visualization
       const animate = () => {
+        if (!isMountedRef.current) return;
         if (analyzer && isRecording) {
-          const frequencyData = new Uint8Array(analyzer.frequencyBinCount);
+          const freqData = new Uint8Array(analyzer.frequencyBinCount);
           const timeData = new Uint8Array(analyzer.frequencyBinCount);
-          analyzer.getByteFrequencyData(frequencyData);
+          analyzer.getByteFrequencyData(freqData);
           analyzer.getByteTimeDomainData(timeData);
 
+          // Update audio data state
+          setFrequencyData(freqData);
+          setTimeData(timeData);
+
           // Update audio quality metrics
-          const quality = calculateAudioQuality(frequencyData, timeData);
+          const quality = calculateAudioQuality(freqData, timeData);
           handleAudioQuality(quality);
 
           // Send audio data to parent
-          onAudioData?.(frequencyData, timeData);
+          onAudioData?.(freqData, timeData);
 
           // Add to buffer
           audioBufferRef.current?.addData(timeData);
@@ -162,12 +299,29 @@ export default function AudioCapture({
 
       animate();
     } catch (err) {
+      if (!isMountedRef.current) return;
+      
       const error = err instanceof Error ? err : new Error('Failed to start recording');
       setError(error);
       onError?.(error);
       cleanupAudioResources();
+      
+      // Show specific error messages based on the error type
+      if (error.name === 'NotAllowedError') {
+        toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
+      } else if (error.name === 'NotFoundError') {
+        toast.error('No microphone found. Please connect a microphone and try again.');
+      } else if (error.name === 'NotReadableError') {
+        toast.error('Microphone is in use by another application. Please close other applications using the microphone.');
+      } else {
+        toast.error('Failed to start recording: ' + error.message);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsInitializing(false);
+      }
     }
-  }, [onAudioData, onBufferReady, onQualityUpdate, onError, cleanupAudioResources]);
+  }, [cleanupAudioResources, onAudioData, onBufferReady, onError, onQualityUpdate]);
 
   const stopRecording = useCallback(() => {
     cleanupAudioResources();
@@ -212,37 +366,32 @@ export default function AudioCapture({
     }
   }, [isRecording, onAudioData, onBufferReady, onQualityUpdate]);
 
-  useEffect(() => {
-    if (isActive) {
-      startRecording();
-    } else {
-      stopRecording();
-    }
-
-    return () => {
-      stopRecording();
-    };
-  }, [isActive, startRecording, stopRecording]);
-
   return (
     <div className="space-y-6">
       {/* Session Status and Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-400'}`} />
+          <div className={`w-3 h-3 rounded-full ${
+            isInitializing ? 'bg-yellow-500 animate-pulse' :
+            isConnected ? 'bg-green-500' : 'bg-gray-400'
+          }`} />
           <span className="text-sm font-medium text-gray-700">
-            {isConnected ? 'Connected' : 'Disconnected'}
+            {isInitializing ? 'Initializing...' :
+             isConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
         <div className="flex items-center space-x-4">
           {/* Mute Button */}
           <button
             onClick={toggleMute}
-            className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors ${
+            disabled={isInitializing || !isConnected}
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors relative group ${
+              isInitializing ? 'bg-gray-100 text-gray-400 cursor-not-allowed' :
               isMuted
                 ? 'bg-red-100 text-red-700 hover:bg-red-200'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
+            title={isMuted ? "Click to unmute your microphone" : "Click to mute your microphone"}
           >
             <svg
               className="w-5 h-5"
@@ -273,9 +422,9 @@ export default function AudioCapture({
 
           {/* Recording Indicator */}
           {isRecording && (
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 bg-red-50 px-3 py-1.5 rounded-lg shadow-sm">
               <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm font-medium text-red-600">Recording</span>
+              <span className="text-sm font-medium text-red-700">Recording</span>
             </div>
           )}
 
@@ -283,7 +432,8 @@ export default function AudioCapture({
           {isSpeaker && isRecording && (
             <button
               onClick={handleQuitCall}
-              className="flex items-center space-x-2 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+              className="flex items-center space-x-2 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors relative group"
+              title="End the current session"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -315,7 +465,11 @@ export default function AudioCapture({
 
       {/* Audio Visualizer */}
       <div className="bg-gray-50 rounded-lg p-4">
-        <AudioVisualizer isActive={isRecording} />
+        <AudioVisualizer 
+          isActive={isRecording} 
+          frequencyData={frequencyData || undefined}
+          timeData={timeData || undefined}
+        />
       </div>
 
       {/* Audio Quality Metrics */}
