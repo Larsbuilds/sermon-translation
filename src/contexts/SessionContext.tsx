@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 interface Session {
   id: string;
@@ -12,6 +12,7 @@ interface Session {
 interface SessionContextType {
   currentSession: Session | null;
   joinSession: (code: string) => Promise<void>;
+  startSession: (name: string, speaker: string) => Promise<{ sessionCode: string }>;
   leaveSession: () => void;
 }
 
@@ -34,12 +35,32 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const startSession = async (name: string, speaker: string) => {
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, speaker }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to start session');
+      }
+      const { sessionCode } = await response.json();
+      return { sessionCode };
+    } catch (error) {
+      console.error('Error starting session:', error);
+      throw error;
+    }
+  };
+
   const leaveSession = () => {
     setCurrentSession(null);
   };
 
   return (
-    <SessionContext.Provider value={{ currentSession, joinSession, leaveSession }}>
+    <SessionContext.Provider value={{ currentSession, joinSession, startSession, leaveSession }}>
       {children}
     </SessionContext.Provider>
   );
