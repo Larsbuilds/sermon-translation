@@ -7,7 +7,18 @@ const config: Config = {
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        primary: {
+          DEFAULT: '#3B82F6',
+          foreground: '#FFFFFF',
+        },
+        secondary: {
+          DEFAULT: '#6B7280',
+          foreground: '#FFFFFF',
+        },
+      },
+    },
   },
   plugins: [],
 }

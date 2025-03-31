@@ -1,8 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useSession } from '@/contexts/SessionContext';
+import { useSession } from '../../contexts/SessionContext';
 import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface SessionCodeDisplayProps {
   isSpeaker: boolean;
@@ -35,9 +38,9 @@ export default function SessionCodeDisplay({ isSpeaker }: SessionCodeDisplayProp
   if (isSpeaker) {
     return (
       <div className="text-center">
-        <h3 className="text-lg font-medium text-gray-900 mb-2">Your Session Code</h3>
-        <div className="text-3xl font-bold text-blue-600 tracking-wider">
-          {currentSession?.id || 'Generating...'}
+        <h3 className="text-lg font-medium mb-2">Your Session Code</h3>
+        <div className="text-3xl font-bold text-primary tracking-wider">
+          {currentSession?.sessionCode || 'Generating...'}
         </div>
       </div>
     );
@@ -45,35 +48,26 @@ export default function SessionCodeDisplay({ isSpeaker }: SessionCodeDisplayProp
 
   return (
     <div>
-      <h3 className="text-lg font-medium text-gray-900 mb-4">Join a Session</h3>
+      <h3 className="text-lg font-medium mb-4">Join a Session</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="code" className="block text-sm font-medium text-gray-700">
-            Enter Session Code
-          </label>
-          <div className="mt-1">
-            <input
-              type="text"
-              id="code"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-              placeholder="Enter 6-digit code"
-              maxLength={6}
-              pattern="[A-Z0-9]{6}"
-            />
-          </div>
+        <div className="space-y-2">
+          <Label htmlFor="sessionCode">Session Code</Label>
+          <Input
+            id="sessionCode"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="Enter 6-digit code"
+            maxLength={6}
+            required
+            className="text-center tracking-wider text-lg"
+          />
         </div>
         {error && (
-          <div className="text-red-600 text-sm">{error}</div>
+          <p className="text-sm text-destructive">{error}</p>
         )}
-        <button
-          type="submit"
-          disabled={code.length !== 6}
-          className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <Button type="submit" className="w-full" disabled={code.length !== 6}>
           Join Session
-        </button>
+        </Button>
       </form>
     </div>
   );

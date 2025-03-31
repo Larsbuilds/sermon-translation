@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useSession } from '@/contexts/SessionContext';
+import { useSession } from '../../contexts/SessionContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Mic, MicOff, Share2 } from 'lucide-react';

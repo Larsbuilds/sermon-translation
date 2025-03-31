@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useSession } from '@/contexts/SessionContext';
-import { useTranslation } from '@/contexts/TranslationContext';
+import { useSession } from '../../contexts/SessionContext';
+import { useTranslation } from '../../contexts/TranslationContext';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';

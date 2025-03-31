@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useSession } from '@/contexts/SessionContext';
+import { useSession } from '../../contexts/SessionContext';
 import SpeakerView from '@/app/components/session/SpeakerView';
 import ClientView from '@/app/components/session/ClientView';
 import { Card } from '@/components/ui/card';
@@ -17,12 +17,6 @@ export default function SessionPage() {
   const [error, setError] = useState<string | null>(null);
 
   const sessionCode = params.code as string;
-
-  useEffect(() => {
-    if (sessionCode && !currentSession) {
-      handleJoinSession();
-    }
-  }, [sessionCode]);
 
   const handleJoinSession = async () => {
     try {
