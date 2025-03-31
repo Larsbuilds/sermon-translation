@@ -105,6 +105,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     console.log('Creating new session:', newSession);
 
+    // Save to IndexedDB first
+    db.saveSession(newSession).then(() => {
+      console.log('Successfully saved new session to IndexedDB');
+    }).catch(error => {
+      console.error('Error saving new session to IndexedDB:', error);
+    });
+
     setSessions(prev => {
       const newSessions = [...prev, newSession];
       console.log('Updated sessions after start:', newSessions);
@@ -114,7 +121,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setCurrentSession(newSession);
 
     return newSession;
-  }, []);
+  }, [db]);
 
   const endSession = useCallback(() => {
     if (currentSession) {
@@ -194,6 +201,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Session code is required');
     }
 
+    console.log('Attempting to join session with code:', sessionCode);
+
     // First, leave the current session if any
     if (currentSession) {
       console.log('Leaving current session before joining new one:', currentSession);
@@ -203,8 +212,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setCurrentSession(null);
     }
 
-    console.log('Attempting to join session with code:', sessionCode);
-
     // Try to find the session in IndexedDB
     let session = await db.getSession(sessionCode);
     
@@ -212,6 +219,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       console.error('Session not found for code:', sessionCode);
       throw new Error('Session not found');
     }
+
+    console.log('Found session in IndexedDB:', session);
 
     // Check if the session is actually ended
     if (session.status === 'ended' && session.endedAt) {
@@ -245,6 +254,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
     
     console.log('Updating session:', updatedSession);
+    
+    // Save to IndexedDB first
+    await db.saveSession(updatedSession);
+    console.log('Successfully saved updated session to IndexedDB');
     
     // Update both sessions and currentSession states
     setSessions(prev => {
