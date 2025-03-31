@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { useSession } from '../../contexts/SessionContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Mic, MicOff, Share2 } from 'lucide-react';
+import { Mic, MicOff, Share2, Copy, Link } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
 interface SpeakerViewProps {
   sessionCode: string;
@@ -11,13 +14,26 @@ interface SpeakerViewProps {
 export default function SpeakerView({ sessionCode }: SpeakerViewProps) {
   const { currentSession } = useSession();
   const [isRecording, setIsRecording] = useState(false);
+  const [showShareOptions, setShowShareOptions] = useState(false);
 
-  const handleShare = async () => {
+  const handleShareLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/session/${sessionCode}`);
-      alert('Session link copied to clipboard!');
+      const shareUrl = `${window.location.origin}/session/${sessionCode}`;
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success('Session link copied to clipboard!');
     } catch (err) {
       console.error('Failed to copy link:', err);
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(sessionCode);
+      toast.success('Session code copied to clipboard!');
+    } catch (err) {
+      console.error('Failed to copy code:', err);
+      toast.error('Failed to copy code');
     }
   };
 
@@ -46,13 +62,54 @@ export default function SpeakerView({ sessionCode }: SpeakerViewProps) {
             <Button
               variant="outline"
               size="icon"
-              onClick={handleShare}
+              onClick={() => setShowShareOptions(!showShareOptions)}
               className="rounded-full"
             >
               <Share2 className="h-4 w-4" />
             </Button>
           </div>
           
+          {showShareOptions && (
+            <div className="space-y-4 p-4 bg-muted rounded-lg">
+              <div className="space-y-2">
+                <Label>Share Link</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={`${window.location.origin}/session/${sessionCode}`}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleShareLink}
+                    className="shrink-0"
+                  >
+                    <Link className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Session Code</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={sessionCode}
+                    className="flex-1 font-mono text-center tracking-wider"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyCode}
+                    className="shrink-0"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Speaker: {currentSession.speaker}</span>
