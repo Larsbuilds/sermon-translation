@@ -1,4 +1,6 @@
-import type { AudioContext, AnalyserNode, MediaStream } from 'web-audio-api';
+type AudioContext = globalThis.AudioContext;
+type AnalyserNode = globalThis.AnalyserNode;
+type MediaStream = globalThis.MediaStream;
 
 export interface AudioAnalyzerConfig {
   fftSize?: number;
