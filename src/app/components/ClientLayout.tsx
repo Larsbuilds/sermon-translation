@@ -1,6 +1,7 @@
 'use client';
 
 import { SessionProvider } from '../contexts/SessionContext';
+import { TranslationProvider } from '../contexts/TranslationContext';
 
 export default function ClientLayout({
   children,
@@ -9,7 +10,9 @@ export default function ClientLayout({
 }) {
   return (
     <SessionProvider>
-      {children}
+      <TranslationProvider>
+        {children}
+      </TranslationProvider>
     </SessionProvider>
   );
 } 
