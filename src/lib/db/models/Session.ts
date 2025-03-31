@@ -5,7 +5,7 @@ const sessionSchema = new mongoose.Schema({
   name: { type: String, required: true },
   speaker: { type: String, required: true },
   status: { type: String, enum: ['active', 'ended'], required: true },
-  listeners: { type: Number, default: 0 },
+  listenerCount: { type: Number, default: 0 },
   createdAt: { type: Date, required: true },
   endedAt: { type: Date },
   participants: [{ type: String }],

@@ -1,86 +1,107 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from '@/app/contexts/SessionContext';
 import { useParams } from 'next/navigation';
-import { useSession } from '../../contexts/SessionContext';
-import SpeakerView from '@/app/components/session/SpeakerView';
-import ClientView from '@/app/components/session/ClientView';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { SessionStatus } from '@/app/components/session/SessionStatus';
+import { SessionControls } from '@/app/components/session/SessionControls';
+import { ParticipantsList } from '@/app/components/session/ParticipantsList';
+import { SessionSettings } from '@/app/components/session/SessionSettings';
+import { SessionTimeoutWarning } from '@/app/components/session/SessionTimeoutWarning';
+import { ConnectionStatus } from '@/app/components/session/ConnectionStatus';
+import { LoadingState } from '@/app/components/session/LoadingState';
 
 export default function SessionPage() {
-  const params = useParams();
-  const router = useRouter();
-  const { currentSession, joinSession } = useSession();
-  const [isJoining, setIsJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { code } = useParams();
+  const {
+    currentSession,
+    isConnected,
+    isSpeaking,
+    setIsSpeaking,
+    participants,
+    duration,
+    timeRemaining,
+    onExtendSession,
+    onEndSession,
+    isLoading,
+    error,
+    joinSession,
+    leaveSession,
+    onRemoveParticipant
+  } = useSession();
+  const [showParticipants, setShowParticipants] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const sessionCode = params.code as string;
-
-  const handleJoinSession = async () => {
-    try {
-      setIsJoining(true);
-      setError(null);
-      await joinSession(sessionCode);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to join session');
-    } finally {
-      setIsJoining(false);
+  useEffect(() => {
+    if (code && typeof code === 'string' && !currentSession) {
+      joinSession(code).catch((error) => {
+        toast.error(error.message || 'Failed to join session');
+      });
     }
-  };
+  }, [code, currentSession, joinSession]);
 
-  if (error) {
-    return (
-      <div className="container mx-auto p-4">
-        <Card className="p-6">
-          <div className="text-center space-y-4">
-            <h2 className="text-2xl font-bold text-red-500">Error</h2>
-            <p className="text-muted-foreground">{error}</p>
-            <Button onClick={() => router.push('/')}>Return Home</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+    }
+  }, [error]);
 
-  if (isJoining) {
-    return (
-      <div className="container mx-auto p-4">
-        <Card className="p-6">
-          <div className="text-center space-y-4">
-            <h2 className="text-2xl font-bold">Joining Session...</h2>
-            <p className="text-muted-foreground">Please wait while we connect you to the session.</p>
-          </div>
-        </Card>
-      </div>
-    );
+  if (isLoading) {
+    return <LoadingState />;
   }
 
   if (!currentSession) {
     return (
-      <div className="container mx-auto p-4">
-        <Card className="p-6">
-          <div className="text-center space-y-4">
-            <h2 className="text-2xl font-bold">Join Session</h2>
-            <p className="text-muted-foreground">Click the button below to join the session.</p>
-            <Button onClick={handleJoinSession}>Join Session</Button>
-          </div>
-        </Card>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Session Not Found</h1>
+          <p className="text-gray-600">The session you're looking for doesn't exist or has ended.</p>
+        </div>
       </div>
     );
   }
 
-  // Determine if the current user is the speaker
-  const isSpeaker = currentSession.speaker === 'You';
-
   return (
-    <div className="min-h-screen bg-background">
-      {isSpeaker ? (
-        <SpeakerView sessionCode={sessionCode} />
-      ) : (
-        <ClientView sessionCode={sessionCode} />
-      )}
+    <div className="container mx-auto px-4 py-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="md:col-span-2">
+          <SessionStatus
+            session={currentSession}
+            duration={duration}
+            timeRemaining={timeRemaining}
+            onExtendSession={onExtendSession}
+            onEndSession={onEndSession}
+          />
+          <SessionControls
+            isSpeaking={isSpeaking}
+            setIsSpeaking={setIsSpeaking}
+            onShowParticipants={() => setShowParticipants(true)}
+            onShowSettings={() => setShowSettings(true)}
+            onLeaveSession={leaveSession}
+          />
+          <ConnectionStatus isConnected={isConnected} />
+        </div>
+        <div className="md:col-span-1">
+          <ParticipantsList
+            participants={participants}
+            onRemoveParticipant={onRemoveParticipant}
+            isOpen={showParticipants}
+            onClose={() => setShowParticipants(false)}
+          />
+          <SessionSettings
+            session={currentSession}
+            isOpen={showSettings}
+            onClose={() => setShowSettings(false)}
+          />
+          {currentSession.autoEnd && timeRemaining < 300 && (
+            <SessionTimeoutWarning
+              timeRemaining={timeRemaining}
+              onExtendSession={onExtendSession}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 } 

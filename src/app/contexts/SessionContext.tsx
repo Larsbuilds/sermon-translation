@@ -1,22 +1,55 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 
 export interface Session {
   id: string;
   name: string;
   speaker: string;
   status: 'active' | 'ended';
-  listeners: number;
+  listenerCount: number;
   createdAt: Date;
   endedAt?: Date;
   participants: string[];
   sessionCode: string;
+  autoEnd: boolean;
+  autoEndMinutes: number;
+  allowListeners: boolean;
+  maxListeners: number;
+}
+
+export interface AudioDevice {
+  deviceId: string;
+  label: string;
+  isActive: boolean;
+}
+
+export interface Participant {
+  id: string;
+  name: string;
+  isSpeaking: boolean;
+  role: 'speaker' | 'listener';
 }
 
 interface SessionContextType {
   sessions: Session[];
   currentSession: Session | null;
+  isConnected: boolean;
+  isSpeaking: boolean;
+  setIsSpeaking: (isSpeaking: boolean) => void;
+  devices: AudioDevice[];
+  selectedDeviceId: string;
+  onDeviceSelect: (deviceId: string) => void;
+  onTestDevice: (deviceId: string) => void;
+  participants: Participant[];
+  onRemoveParticipant: (id: string) => void;
+  duration: number;
+  timeRemaining: number;
+  onExtendSession: () => void;
+  onEndSession: () => void;
+  isLoading: boolean;
+  error: string | null;
   startSession: (name: string, speaker: string) => Promise<Session>;
   joinSession: (sessionCode: string) => Promise<void>;
   endSession: () => Promise<void>;
@@ -36,24 +69,92 @@ const generateSessionCode = () => {
   return code;
 };
 
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [duration, setDuration] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const cleanupRef = useRef<NodeJS.Timeout | null>(null);
+  const durationRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load sessions from server
   useEffect(() => {
     const loadSessions = async () => {
       try {
+        setIsLoading(true);
         const response = await fetch('/api/sessions');
         const loadedSessions = await response.json();
         console.log('Loaded sessions from server:', loadedSessions);
         setSessions(loadedSessions);
       } catch (error) {
         console.error('Error loading sessions:', error);
+        toast.error('Failed to load sessions');
+        setError('Failed to load sessions');
+      } finally {
+        setIsLoading(false);
       }
     };
     loadSessions();
   }, []);
+
+  // Start session timeout when a session is created
+  const startSessionTimeout = useCallback((sessionId: string) => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(async () => {
+      const session = sessions.find(s => s.id === sessionId);
+      if (session && session.status === 'active') {
+        await endSession();
+        toast.info('Session ended due to inactivity');
+      }
+    }, SESSION_TIMEOUT);
+  }, [sessions]);
+
+  // Cleanup inactive sessions
+  const cleanupInactiveSessions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/sessions/cleanup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          timeout: SESSION_TIMEOUT
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to cleanup sessions');
+      }
+
+      const updatedSessions = await response.json();
+      setSessions(updatedSessions);
+    } catch (error) {
+      console.error('Error cleaning up sessions:', error);
+    }
+  }, []);
+
+  // Start cleanup interval
+  useEffect(() => {
+    cleanupRef.current = setInterval(cleanupInactiveSessions, CLEANUP_INTERVAL);
+    return () => {
+      if (cleanupRef.current) {
+        clearInterval(cleanupRef.current);
+      }
+    };
+  }, [cleanupInactiveSessions]);
 
   const startSession = useCallback(async (name: string, speaker: string) => {
     const sessionId = name.toLowerCase().replace(/\s+/g, '-');
@@ -65,13 +166,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       name,
       speaker: 'You',
       status: 'active',
-      listeners: 0,
+      listenerCount: 0,
       createdAt: new Date(),
       participants: ['You'],
-      sessionCode
+      sessionCode,
+      autoEnd: false,
+      autoEndMinutes: 30,
+      allowListeners: true,
+      maxListeners: 10
     };
-
-    console.log('Creating new session:', newSession);
 
     try {
       const response = await fetch('/api/sessions', {
@@ -87,25 +190,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
 
       const savedSession = await response.json();
-      console.log('Successfully saved new session:', savedSession);
-
-      setSessions(prev => {
-        const newSessions = [...prev, savedSession];
-        console.log('Updated sessions after start:', newSessions);
-        return newSessions;
-      });
-      
+      setSessions(prev => [...prev, savedSession]);
       setCurrentSession(savedSession);
+      startSessionTimeout(sessionId);
 
       return savedSession;
     } catch (error) {
       console.error('Error saving session:', error);
+      toast.error('Failed to start session');
       throw error;
     }
-  }, []);
+  }, [startSessionTimeout]);
 
   const endSession = useCallback(async () => {
     if (currentSession) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+
       const updatedSession: Session = {
         ...currentSession,
         status: 'ended' as const,
@@ -133,8 +235,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           )
         );
         setCurrentSession(null);
+        toast.success('Session ended successfully');
       } catch (error) {
         console.error('Error ending session:', error);
+        toast.error('Failed to end session');
         throw error;
       }
     }
@@ -146,7 +250,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     const updatedSession: Session = {
       ...session,
-      listeners: count
+      listenerCount: count
     };
 
     try {
@@ -184,7 +288,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const updatedSession: Session = {
       ...session,
       participants: session.participants.filter(p => p !== participantId),
-      listeners: Math.max(0, session.listeners - 1)
+      listenerCount: Math.max(0, session.listenerCount - 1)
     };
 
     try {
@@ -292,7 +396,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const updatedSession: Session = {
         ...session,
         participants: [...session.participants, 'You'],
-        listeners: session.listeners + 1
+        listenerCount: session.listenerCount + 1
       };
       
       console.log('Updating session:', updatedSession);
@@ -325,17 +429,44 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentSession, removeParticipant]);
 
+  const value: SessionContextType = {
+    sessions,
+    currentSession,
+    isConnected,
+    isSpeaking,
+    setIsSpeaking,
+    devices,
+    selectedDeviceId,
+    onDeviceSelect: (deviceId: string) => {
+      setSelectedDeviceId(deviceId);
+    },
+    onTestDevice: (deviceId: string) => {
+      // Implementation needed
+    },
+    participants,
+    onRemoveParticipant: (id: string) => {
+      if (currentSession) {
+        removeParticipant(currentSession.sessionCode, id);
+      }
+    },
+    duration,
+    timeRemaining,
+    onExtendSession: () => {
+      // Implementation needed
+    },
+    onEndSession: endSession,
+    isLoading,
+    error,
+    startSession,
+    joinSession,
+    endSession,
+    leaveSession,
+    updateListenerCount,
+    removeParticipant,
+  };
+
   return (
-    <SessionContext.Provider value={{
-      sessions,
-      currentSession,
-      startSession,
-      joinSession,
-      endSession,
-      leaveSession,
-      updateListenerCount,
-      removeParticipant
-    }}>
+    <SessionContext.Provider value={value}>
       {children}
     </SessionContext.Provider>
   );

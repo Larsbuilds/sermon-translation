@@ -7,6 +7,7 @@ import { AudioBuffer } from '../../../lib/audio/buffer';
 import { AudioQualityMetrics } from '../../../types/audio';
 import AudioVisualizer from './AudioVisualizer';
 import { useSession } from '../../contexts/SessionContext';
+import { toast } from 'sonner';
 
 interface AudioCaptureProps {
   onAudioData?: (frequencyData: Uint8Array, timeData: Uint8Array) => void;
@@ -85,6 +86,22 @@ export default function AudioCapture({
     setAudioQuality(null);
   }, []);
 
+  const handleAudioQuality = (quality: AudioQualityMetrics) => {
+    setAudioQuality(quality);
+    onQualityUpdate?.(quality);
+
+    // Check for poor audio quality conditions
+    if (quality.signalStrength < 0.3) {
+      toast.warning('Audio signal is weak. Please check your microphone.');
+    }
+    if (quality.noiseLevel > 0.7) {
+      toast.warning('High background noise detected. Please move to a quieter location.');
+    }
+    if (quality.clarity < 0.4) {
+      toast.warning('Audio clarity is low. Please speak more clearly or check your microphone.');
+    }
+  };
+
   const startRecording = useCallback(async () => {
     try {
       // Cleanup any existing resources first
@@ -129,8 +146,7 @@ export default function AudioCapture({
 
           // Update audio quality metrics
           const quality = calculateAudioQuality(frequencyData, timeData);
-          setAudioQuality(quality);
-          onQualityUpdate?.(quality);
+          handleAudioQuality(quality);
 
           // Send audio data to parent
           onAudioData?.(frequencyData, timeData);
@@ -177,8 +193,7 @@ export default function AudioCapture({
 
               // Update audio quality metrics
               const quality = calculateAudioQuality(frequencyData, timeData);
-              setAudioQuality(quality);
-              onQualityUpdate?.(quality);
+              handleAudioQuality(quality);
 
               // Send audio data to parent
               onAudioData?.(frequencyData, timeData);
