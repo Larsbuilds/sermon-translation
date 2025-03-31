@@ -1,140 +1,82 @@
 'use client';
 
-import React, { useState } from 'react';
-import AudioCapture from './components/audio/AudioCapture';
-import DeviceManager from './components/device/DeviceManager';
-import { TranslationOrchestrationClient } from '../lib/orchestration/client';
-import { AudioQualityMetrics } from '../types/audio';
+import { useState } from 'react';
+import { useSession } from './contexts/SessionContext';
+import StartSessionModal from './components/sessions/StartSessionModal';
+import SessionCodeDisplay from './components/sessions/SessionCodeDisplay';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const [isMain, setIsMain] = useState(false);
-  const [sessionId, setSessionId] = useState('');
-  const [orchestrationClient, setOrchestrationClient] = useState<TranslationOrchestrationClient | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { sessions } = useSession();
+  const [showStartModal, setShowStartModal] = useState(false);
+  const router = useRouter();
 
   const handleStartSession = () => {
-    if (!sessionId) {
-      setError('Please enter a session ID');
-      return;
-    }
-    // Generate a random session ID if none provided
-    const newSessionId = sessionId || `session-${Math.random().toString(36).substr(2, 9)}`;
-    setSessionId(newSessionId);
-  };
-
-  const handleDeviceConnected = (client: TranslationOrchestrationClient) => {
-    setOrchestrationClient(client);
-    setError(null);
-  };
-
-  const handleDeviceDisconnected = () => {
-    setOrchestrationClient(null);
-  };
-
-  const handleError = (error: Error) => {
-    setError(error.message);
-  };
-
-  const handleAudioData = (frequencyData: Uint8Array, timeData: Uint8Array) => {
-    // Handle audio data processing
-    console.log('Received audio data:', { frequencyData, timeData });
-  };
-
-  const handleBufferReady = (buffer: Float32Array) => {
-    // Handle buffer ready for translation
-    console.log('Buffer ready for translation:', buffer);
-  };
-
-  const handleQualityUpdate = (metrics: AudioQualityMetrics) => {
-    // Handle quality metrics update
-    console.log('Audio quality metrics:', metrics);
+    setShowStartModal(true);
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Sermon Translation System</h1>
-        <p className="text-gray-600 mb-8">Real-time translation for sermons and presentations</p>
-        
-        {/* Session Setup */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-6">Session Setup</h2>
-          <div className="flex flex-col md:flex-row gap-6 items-end">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Session ID
-              </label>
-              <input
-                type="text"
-                value={sessionId}
-                onChange={(e) => setSessionId(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                placeholder="Enter or generate session ID"
-              />
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              <h1 className="text-xl font-semibold text-gray-900">Sermon Translation</h1>
             </div>
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Device Role
-              </label>
-              <select
-                value={isMain ? 'main' : 'listener'}
-                onChange={(e) => setIsMain(e.target.value === 'main')}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              >
-                <option value="main">Main Device (Speaker)</option>
-                <option value="listener">Listener Device</option>
-              </select>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container mx-auto px-4 py-12">
+        <div className="max-w-2xl mx-auto">
+          {/* Hero Section */}
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">
+              Real-time Sermon Translation
+            </h2>
+            <p className="text-lg text-gray-600">
+              Start or join a session to begin translating sermons in real-time.
+            </p>
+          </div>
+
+          {/* Session Code Display/Join Form */}
+          <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
+            <SessionCodeDisplay isSpeaker={false} />
+          </div>
+
+          {/* Start New Session */}
+          <div className="text-center">
+            <div className="relative mb-8">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-gray-50 text-gray-500">Or</span>
+              </div>
             </div>
             <button
               onClick={handleStartSession}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105 shadow-md"
+              className="px-6 py-3 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex items-center mx-auto"
             >
-              Start Session
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Start New Session
             </button>
           </div>
         </div>
+      </main>
 
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg mb-8">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Device Manager */}
-        {sessionId && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
-            <DeviceManager
-              isMain={isMain}
-              sessionId={sessionId}
-              onConnected={handleDeviceConnected}
-              onDisconnected={handleDeviceDisconnected}
-              onError={handleError}
-            />
-          </div>
-        )}
-
-        {/* Audio Capture */}
-        {orchestrationClient && (
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-            <AudioCapture
-              onAudioData={handleAudioData}
-              onBufferReady={handleBufferReady}
-              onQualityUpdate={handleQualityUpdate}
-              onError={handleError}
-            />
-          </div>
-        )}
-      </div>
-    </main>
+      {/* Start Session Modal */}
+      <StartSessionModal
+        isOpen={showStartModal}
+        onClose={() => setShowStartModal(false)}
+      />
+    </div>
   );
 } 

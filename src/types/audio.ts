@@ -1,7 +1,6 @@
 export interface AudioQualityMetrics {
-  signalLevel: number;    // 0-1
-  noiseLevel: number;     // 0-1
-  clipping: number;       // 0-1
-  frequencyRange: number; // 0-1
-  qualityScore: number;   // 0-100
+  signalStrength: number;  // 0-1, higher is better
+  noiseLevel: number;     // 0-1, lower is better
+  clarity: number;        // 0-1, higher is better
+  qualityScore: number;   // 0-100, overall quality score
 } 

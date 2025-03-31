@@ -6,63 +6,37 @@ export interface AudioBufferConfig {
 
 export class AudioBuffer {
   private buffer: Float32Array;
-  private position: number = 0;
-  private config: AudioBufferConfig;
-  private isFull: boolean = false;
+  private position: number;
+  private readonly size: number;
 
-  constructor(config: AudioBufferConfig) {
-    this.config = config;
-    this.buffer = new Float32Array(config.bufferSize);
-  }
-
-  addSamples(samples: Float32Array): void {
-    const remainingSpace = this.config.bufferSize - this.position;
-    const samplesToAdd = Math.min(samples.length, remainingSpace);
-
-    // Add samples to buffer
-    this.buffer.set(samples.slice(0, samplesToAdd), this.position);
-    this.position += samplesToAdd;
-
-    // Check if buffer is full
-    if (this.position >= this.config.bufferSize) {
-      this.isFull = true;
-    }
-
-    // If we have more samples than space, keep the overlap
-    if (samples.length > samplesToAdd) {
-      const overlapSamples = samples.slice(samples.length - this.config.overlap);
-      this.buffer.set(overlapSamples, 0);
-      this.position = this.config.overlap;
-    }
-  }
-
-  getBuffer(): Float32Array | null {
-    if (!this.isFull) {
-      return null;
-    }
-
-    // Create a copy of the current buffer
-    const result = new Float32Array(this.buffer);
-    
-    // Shift the buffer by overlap amount
-    this.buffer.copyWithin(0, this.config.overlap);
-    this.position -= this.config.overlap;
-    this.isFull = false;
-
-    return result;
-  }
-
-  isBufferFull(): boolean {
-    return this.isFull;
-  }
-
-  getBufferProgress(): number {
-    return this.position / this.config.bufferSize;
-  }
-
-  reset(): void {
+  constructor(size: number = 4096) {
+    this.size = size;
+    this.buffer = new Float32Array(size);
     this.position = 0;
-    this.isFull = false;
+  }
+
+  addData(data: Uint8Array) {
+    const floatData = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i++) {
+      floatData[i] = (data[i] - 128) / 128.0;
+    }
+
+    for (let i = 0; i < floatData.length; i++) {
+      this.buffer[this.position] = floatData[i];
+      this.position = (this.position + 1) % this.size;
+    }
+  }
+
+  isReady(): boolean {
+    return this.position >= this.size;
+  }
+
+  getData(): Float32Array {
+    return this.buffer;
+  }
+
+  reset() {
+    this.position = 0;
     this.buffer.fill(0);
   }
 } 
