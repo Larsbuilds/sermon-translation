@@ -21,14 +21,14 @@ export default function AudioCapture({
   onQualityUpdate,
   onError,
   isActive = true
-}: AudioCaptureProps): JSX.Element {
+}: AudioCaptureProps): React.ReactElement {
   const [isRecording, setIsRecording] = useState(false);
   const [currentFrequencyData, setCurrentFrequencyData] = useState<Uint8Array | null>(null);
   const [currentTimeData, setCurrentTimeData] = useState<Uint8Array | null>(null);
   const [qualityMetrics, setQualityMetrics] = useState<AudioQualityMetrics | null>(null);
   
   const analyzerRef = useRef<AudioAnalyzerResult | null>(null);
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | undefined>(undefined);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
 
   const startAnalysis = useCallback(() => {

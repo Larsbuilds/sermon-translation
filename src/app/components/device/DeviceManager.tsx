@@ -17,7 +17,7 @@ export default function DeviceManager({
   onConnected,
   onDisconnected,
   onError
-}: DeviceManagerProps): JSX.Element {
+}: DeviceManagerProps): React.ReactElement {
   const [isConnected, setIsConnected] = useState(false);
   const [client, setClient] = useState<TranslationOrchestrationClient | null>(null);
 
@@ -25,7 +25,7 @@ export default function DeviceManager({
     try {
       const newClient = new TranslationOrchestrationClient({
         deviceId: `device-${Math.random().toString(36).substr(2, 9)}`,
-        isMainDevice: isMain,
+        isMain,
         sessionId
       });
 
