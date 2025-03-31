@@ -29,13 +29,11 @@ async function connectDB() {
       maxIdleTimeMS: 30000,
       heartbeatFrequencyMS: 10000,
       retryWrites: true,
-      w: 'majority',
-      directConnection: false,
+      writeConcern: { w: 'majority' },
       ssl: true,
       tls: true,
       tlsAllowInvalidCertificates: true,
       tlsAllowInvalidHostnames: true,
-      tlsInsecure: true,
     };
 
     console.log('Connecting to MongoDB with URI:', MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//****:****@'));
