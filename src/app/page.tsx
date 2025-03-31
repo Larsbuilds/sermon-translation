@@ -123,7 +123,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Audio Controls */}
+        {/* Audio Capture */}
         {orchestrationClient && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
             <AudioCapture
@@ -131,7 +131,6 @@ export default function Home() {
               onBufferReady={handleBufferReady}
               onQualityUpdate={handleQualityUpdate}
               onError={handleError}
-              isActive={true}
             />
           </div>
         )}

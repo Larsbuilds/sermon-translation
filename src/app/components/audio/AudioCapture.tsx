@@ -98,44 +98,37 @@ export default function AudioCapture({
       cancelAnimationFrame(animationFrameRef.current);
     }
     if (audioBufferRef.current) {
-      audioBufferRef.current.reset();
       audioBufferRef.current = null;
     }
     setIsRecording(false);
   }, []);
 
   useEffect(() => {
-    if (isActive && !isRecording) {
-      startRecording();
-    } else if (!isActive && isRecording) {
-      stopRecording();
-    }
-
     return () => {
       stopRecording();
     };
-  }, [isActive, isRecording, startRecording, stopRecording]);
+  }, [stopRecording]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Audio Capture</h2>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-800">Audio Capture</h2>
         <button
-          onClick={() => isRecording ? stopRecording() : startRecording()}
-          className={`px-6 py-3 rounded-lg font-semibold text-white transition-all duration-200 transform hover:scale-105 ${
+          onClick={isRecording ? stopRecording : startRecording}
+          className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
             isRecording
-              ? 'bg-red-500 hover:bg-red-600 shadow-red-200'
-              : 'bg-blue-500 hover:bg-blue-600 shadow-blue-200'
-          } shadow-lg`}
+              ? 'bg-red-500 hover:bg-red-600 text-white'
+              : 'bg-blue-500 hover:bg-blue-600 text-white'
+          }`}
         >
           {isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
       </div>
 
       {isRecording && currentFrequencyData && currentTimeData && (
-        <div className="space-y-6">
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4">Audio Visualization</h3>
+        <div className="space-y-4">
+          <div className="bg-gray-50 rounded-lg p-4">
+            <h3 className="text-lg font-medium text-gray-700 mb-2">Audio Visualization</h3>
             <AudioVisualizer
               frequencyData={currentFrequencyData}
               timeData={currentTimeData}
@@ -143,63 +136,39 @@ export default function AudioCapture({
               height={200}
             />
           </div>
-          
+
           {qualityMetrics && (
-            <div className="bg-gray-50 p-6 rounded-lg">
-              <h3 className="text-lg font-semibold text-gray-700 mb-4">Audio Quality Metrics</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm font-medium text-gray-600">Signal Level</p>
-                    <span className="text-sm text-gray-500">{Math.round(qualityMetrics.signalLevel * 100)}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                      style={{ width: `${qualityMetrics.signalLevel * 100}%` }}
-                    />
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h3 className="text-lg font-medium text-gray-700 mb-2">Audio Quality Metrics</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="bg-white p-3 rounded-lg shadow">
+                  <div className="text-sm text-gray-500">Signal Level</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(qualityMetrics.signalLevel * 100).toFixed(1)}%
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm font-medium text-gray-600">Noise Level</p>
-                    <span className="text-sm text-gray-500">{Math.round(qualityMetrics.noiseLevel * 100)}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className="bg-red-600 h-2.5 rounded-full transition-all duration-300"
-                      style={{ width: `${qualityMetrics.noiseLevel * 100}%` }}
-                    />
+                <div className="bg-white p-3 rounded-lg shadow">
+                  <div className="text-sm text-gray-500">Noise Level</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(qualityMetrics.noiseLevel * 100).toFixed(1)}%
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm font-medium text-gray-600">Clipping</p>
-                    <span className="text-sm text-gray-500">{Math.round(qualityMetrics.clipping * 100)}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className="bg-yellow-600 h-2.5 rounded-full transition-all duration-300"
-                      style={{ width: `${qualityMetrics.clipping * 100}%` }}
-                    />
+                <div className="bg-white p-3 rounded-lg shadow">
+                  <div className="text-sm text-gray-500">Clipping</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(qualityMetrics.clipping * 100).toFixed(1)}%
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm font-medium text-gray-600">Quality Score</p>
-                    <span className="text-sm text-gray-500">{qualityMetrics.qualityScore}%</span>
+                <div className="bg-white p-3 rounded-lg shadow">
+                  <div className="text-sm text-gray-500">Frequency Range</div>
+                  <div className="text-lg font-semibold text-gray-800">
+                    {(qualityMetrics.frequencyRange * 100).toFixed(1)}%
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className={`h-2.5 rounded-full transition-all duration-300 ${
-                        qualityMetrics.qualityScore > 80
-                          ? 'bg-green-600'
-                          : qualityMetrics.qualityScore > 60
-                          ? 'bg-yellow-600'
-                          : 'bg-red-600'
-                      }`}
-                      style={{ width: `${qualityMetrics.qualityScore}%` }}
-                    />
+                </div>
+                <div className="bg-white p-3 rounded-lg shadow col-span-2 md:col-span-3">
+                  <div className="text-sm text-gray-500">Overall Quality Score</div>
+                  <div className="text-2xl font-bold text-gray-800">
+                    {qualityMetrics.qualityScore}/100
                   </div>
                 </div>
               </div>
