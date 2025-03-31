@@ -3,8 +3,8 @@ import connectDB from './mongodb';
 
 class ServerStorage {
   private static instance: ServerStorage;
-  private maxRetries = 3;
-  private retryDelay = 1000; // 1 second
+  private maxRetries = 2;
+  private retryDelay = 500; // 0.5 seconds
 
   private constructor() {}
 
@@ -40,7 +40,7 @@ class ServerStorage {
       await SessionModel.findOneAndUpdate(
         { sessionCode: session.sessionCode },
         session,
-        { upsert: true, new: true }
+        { upsert: true, new: true, lean: true }
       );
     });
   }
@@ -49,10 +49,10 @@ class ServerStorage {
     console.log('Getting session from MongoDB with code:', sessionCode);
     return await this.withRetry(async () => {
       await connectDB();
-      const session = await SessionModel.findOne({ sessionCode });
+      const session = await SessionModel.findOne({ sessionCode }).lean();
       if (session) {
         console.log('Found session in MongoDB:', session);
-        return session.toObject();
+        return session;
       }
       console.log('No session found in MongoDB with code:', sessionCode);
       return null;
@@ -63,9 +63,9 @@ class ServerStorage {
     console.log('Getting all sessions from MongoDB');
     return await this.withRetry(async () => {
       await connectDB();
-      const sessions = await SessionModel.find({});
+      const sessions = await SessionModel.find({}).lean();
       console.log('Retrieved sessions from MongoDB:', sessions);
-      return sessions.map(session => session.toObject());
+      return sessions;
     });
   }
 

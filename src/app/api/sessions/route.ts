@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { serverStorage } from '@/lib/db/serverStorage';
 
+export const maxDuration = 8; // Set maximum duration to 8 seconds
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
