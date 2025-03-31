@@ -26,8 +26,6 @@ interface SessionContextType {
   removeParticipant: (sessionCode: string, participantId: string) => void;
 }
 
-const STORAGE_KEY = 'sermon-translation-sessions';
-
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 const generateSessionCode = () => {
@@ -50,6 +48,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       try {
         await db.init();
         const loadedSessions = await db.getSessions();
+        console.log('Loaded sessions from IndexedDB:', loadedSessions);
         setSessions(loadedSessions);
       } catch (error) {
         console.error('Error initializing database:', error);
@@ -62,6 +61,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const saveSessions = async () => {
       try {
+        console.log('Saving sessions to IndexedDB:', sessions);
         for (const session of sessions) {
           await db.saveSession(session);
         }
@@ -77,6 +77,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const saveCurrentSession = async () => {
       try {
         if (currentSession) {
+          console.log('Saving current session to IndexedDB:', currentSession);
           await db.saveSession(currentSession);
         }
       } catch (error) {
