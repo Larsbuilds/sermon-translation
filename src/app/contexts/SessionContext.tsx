@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { SessionDB } from '@/lib/db/indexedDB';
 
 export interface Session {
   id: string;
@@ -39,140 +40,51 @@ const generateSessionCode = () => {
 };
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
-  const [sessions, setSessions] = useState<Session[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedSessions = localStorage.getItem(STORAGE_KEY);
-        console.log('Initial load from localStorage:', savedSessions);
-        if (savedSessions) {
-          const parsedSessions = JSON.parse(savedSessions);
-          // Convert date strings back to Date objects
-          const sessionsWithDates = parsedSessions.map((session: any) => ({
-            ...session,
-            createdAt: new Date(session.createdAt),
-            endedAt: session.endedAt ? new Date(session.endedAt) : undefined
-          }));
-          console.log('Parsed sessions with dates:', sessionsWithDates);
-          return sessionsWithDates;
-        }
-      } catch (error) {
-        console.error('Error loading sessions from localStorage:', error);
-      }
-    }
-    return [];
-  });
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [db] = useState(() => new SessionDB());
 
-  const [currentSession, setCurrentSession] = useState<Session | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedCurrentSession = localStorage.getItem('current-session');
-        if (savedCurrentSession) {
-          const parsedSession = JSON.parse(savedCurrentSession);
-          return {
-            ...parsedSession,
-            createdAt: new Date(parsedSession.createdAt),
-            endedAt: parsedSession.endedAt ? new Date(parsedSession.endedAt) : undefined
-          };
-        }
-      } catch (error) {
-        console.error('Error loading current session from localStorage:', error);
-      }
-    }
-    return null;
-  });
-
-  // Add storage event listener to sync between windows
+  // Initialize database and load sessions
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY && e.newValue) {
-        try {
-          const parsedSessions = JSON.parse(e.newValue);
-          const sessionsWithDates = parsedSessions.map((session: any) => ({
-            ...session,
-            createdAt: new Date(session.createdAt),
-            endedAt: session.endedAt ? new Date(session.endedAt) : undefined
-          }));
-          console.log('Syncing sessions from storage event:', sessionsWithDates);
-          setSessions(sessionsWithDates);
-        } catch (error) {
-          console.error('Error syncing sessions from storage event:', error);
-        }
-      } else if (e.key === 'current-session' && e.newValue) {
-        try {
-          const parsedSession = JSON.parse(e.newValue);
-          const sessionWithDates = {
-            ...parsedSession,
-            createdAt: new Date(parsedSession.createdAt),
-            endedAt: parsedSession.endedAt ? new Date(parsedSession.endedAt) : undefined
-          };
-          console.log('Syncing current session from storage event:', sessionWithDates);
-          setCurrentSession(sessionWithDates);
-        } catch (error) {
-          console.error('Error syncing current session from storage event:', error);
-        }
+    const initDB = async () => {
+      try {
+        await db.init();
+        const loadedSessions = await db.getSessions();
+        setSessions(loadedSessions);
+      } catch (error) {
+        console.error('Error initializing database:', error);
       }
     };
+    initDB();
+  }, [db]);
 
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
-  // Save sessions to localStorage whenever they change
+  // Save sessions to IndexedDB whenever they change
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    const saveSessions = async () => {
       try {
-        console.log('Saving sessions to localStorage:', sessions);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-      } catch (error) {
-        console.error('Error saving sessions to localStorage:', error);
-      }
-    }
-  }, [sessions]);
-
-  // Save current session to localStorage whenever it changes
-  useEffect(() => {
-    if (typeof window !== 'undefined' && currentSession) {
-      console.log('Saving current session to localStorage:', currentSession);
-      try {
-        localStorage.setItem('current-session', JSON.stringify(currentSession));
-      } catch (error) {
-        console.error('Error saving current session to localStorage:', error);
-      }
-    } else if (typeof window !== 'undefined') {
-      localStorage.removeItem('current-session');
-    }
-  }, [currentSession]);
-
-  // Cleanup ended sessions after 1 hour
-  useEffect(() => {
-    const cleanupInterval = setInterval(() => {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      setSessions(prevSessions => 
-        prevSessions.filter(session => 
-          session.status === 'active' || 
-          (session.endedAt && session.endedAt > oneHourAgo)
-        )
-      );
-    }, 60000); // Check every minute
-
-    return () => clearInterval(cleanupInterval);
-  }, []);
-
-  // Handle page unload
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (currentSession) {
-        if (currentSession.speaker !== 'You') {
-          removeParticipant(currentSession.sessionCode, 'You');
-        } else {
-          endSession();
+        for (const session of sessions) {
+          await db.saveSession(session);
         }
+      } catch (error) {
+        console.error('Error saving sessions to IndexedDB:', error);
       }
     };
+    saveSessions();
+  }, [sessions, db]);
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [currentSession]);
+  // Save current session to IndexedDB whenever it changes
+  useEffect(() => {
+    const saveCurrentSession = async () => {
+      try {
+        if (currentSession) {
+          await db.saveSession(currentSession);
+        }
+      } catch (error) {
+        console.error('Error saving current session to IndexedDB:', error);
+      }
+    };
+    saveCurrentSession();
+  }, [currentSession, db]);
 
   const startSession = useCallback((name: string, speaker: string) => {
     const sessionId = name.toLowerCase().replace(/\s+/g, '-');
@@ -182,11 +94,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const newSession: Session = {
       id: sessionId,
       name,
-      speaker: 'You', // Always set speaker as 'You' for the creator
+      speaker: 'You',
       status: 'active',
       listeners: 0,
       createdAt: new Date(),
-      participants: ['You'], // Initialize with the speaker
+      participants: ['You'],
       sessionCode
     };
 
@@ -200,18 +112,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     
     setCurrentSession(newSession);
 
-    // Save to localStorage immediately
-    try {
-      const updatedSessions = [...sessions, newSession];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions));
-      localStorage.setItem('current-session', JSON.stringify(newSession));
-      console.log('Saved new session to localStorage:', updatedSessions);
-    } catch (error) {
-      console.error('Error saving new session to localStorage:', error);
-    }
-
     return newSession;
-  }, [sessions]);
+  }, []);
 
   const endSession = useCallback(() => {
     if (currentSession) {
@@ -283,11 +185,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         removeParticipant(currentSession.sessionCode, 'You');
       }
       setCurrentSession(null);
-      localStorage.removeItem('current-session');
     }
   }, [currentSession, removeParticipant]);
 
-  const joinSession = useCallback((sessionCode: string) => {
+  const joinSession = useCallback(async (sessionCode: string) => {
     if (!sessionCode) {
       throw new Error('Session code is required');
     }
@@ -299,71 +200,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         removeParticipant(currentSession.sessionCode, 'You');
       }
       setCurrentSession(null);
-      localStorage.removeItem('current-session');
     }
 
     console.log('Attempting to join session with code:', sessionCode);
-    console.log('Available sessions:', sessions);
 
-    // First try to find the session in the current state
-    let session = sessions.find(s => {
-      const matches = s.sessionCode && s.sessionCode.toUpperCase() === sessionCode.toUpperCase();
-      console.log('Comparing session codes:', {
-        sessionCode: s.sessionCode,
-        inputCode: sessionCode,
-        matches,
-        status: s.status
-      });
-      return matches;
-    });
-
-    // If not found, try to load from localStorage
-    if (!session && typeof window !== 'undefined') {
-      try {
-        const savedSessions = localStorage.getItem(STORAGE_KEY);
-        console.log('Loading sessions from localStorage for join:', savedSessions);
-        if (savedSessions) {
-          const parsedSessions = JSON.parse(savedSessions);
-          const foundSession = parsedSessions.find((s: any) => 
-            s.sessionCode && s.sessionCode.toUpperCase() === sessionCode.toUpperCase()
-          );
-          if (foundSession) {
-            console.log('Found session in localStorage:', foundSession);
-            // Ensure all required properties are present
-            if (!foundSession.id || !foundSession.name || !foundSession.speaker || !foundSession.sessionCode) {
-              console.error('Found session is missing required properties:', foundSession);
-              throw new Error('Invalid session data');
-            }
-            // Update the sessions state with the found session
-            setSessions(prev => {
-              const newSessions = [...prev];
-              if (!newSessions.find(s => s.sessionCode === foundSession.sessionCode)) {
-                newSessions.push({
-                  id: foundSession.id,
-                  name: foundSession.name,
-                  speaker: foundSession.speaker,
-                  status: foundSession.status || 'active',
-                  listeners: foundSession.listeners || 0,
-                  createdAt: new Date(foundSession.createdAt),
-                  endedAt: foundSession.endedAt ? new Date(foundSession.endedAt) : undefined,
-                  participants: foundSession.participants || [foundSession.speaker],
-                  sessionCode: foundSession.sessionCode
-                });
-              }
-              return newSessions;
-            });
-            session = {
-              ...foundSession,
-              status: foundSession.status || 'active',
-              createdAt: new Date(foundSession.createdAt),
-              endedAt: foundSession.endedAt ? new Date(foundSession.endedAt) : undefined
-            };
-          }
-        }
-      } catch (error) {
-        console.error('Error loading sessions from localStorage for join:', error);
-      }
-    }
+    // Try to find the session in IndexedDB
+    let session = await db.getSession(sessionCode);
     
     if (!session) {
       console.error('Session not found for code:', sessionCode);
@@ -375,12 +217,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
       if (session.endedAt > oneHourAgo) {
         // If the session was ended less than an hour ago, reactivate it
-        session = {
+        const reactivatedSession: Session = {
           ...session,
-          status: 'active',
+          status: 'active' as const,
           endedAt: undefined
         };
-        console.log('Reactivating ended session:', session);
+        console.log('Reactivating ended session:', reactivatedSession);
+        await db.saveSession(reactivatedSession);
+        session = reactivatedSession;
       } else {
         throw new Error('Session has ended');
       }
@@ -393,7 +237,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const updatedSession = {
+    const updatedSession: Session = {
       ...session,
       participants: [...session.participants, 'You'],
       listeners: session.listeners + 1
@@ -410,21 +254,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return newSessions;
     });
 
-    // Always update the currentSession for both speaker and listener
     setCurrentSession(updatedSession);
-
-    // Save to localStorage immediately
-    try {
-      const updatedSessions = sessions.map(s => 
-        s.sessionCode === session.sessionCode ? updatedSession : s
-      );
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSessions));
-      localStorage.setItem('current-session', JSON.stringify(updatedSession));
-      console.log('Saved updated session to localStorage:', updatedSessions);
-    } catch (error) {
-      console.error('Error saving updated session to localStorage:', error);
-    }
-  }, [sessions, currentSession, removeParticipant]);
+  }, [currentSession, db, removeParticipant]);
 
   // Add navigation event listener to clear current session
   useEffect(() => {
@@ -432,7 +263,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       if (currentSession) {
         console.log('Navigation detected, clearing current session');
         setCurrentSession(null);
-        localStorage.removeItem('current-session');
       }
     };
 
