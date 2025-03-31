@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { SessionDB } from '@/lib/db/indexedDB';
 
 export interface Session {
   id: string;
@@ -18,12 +17,12 @@ export interface Session {
 interface SessionContextType {
   sessions: Session[];
   currentSession: Session | null;
-  startSession: (name: string, speaker: string) => Session;
-  joinSession: (sessionCode: string) => void;
-  endSession: () => void;
-  leaveSession: () => void;
-  updateListenerCount: (sessionId: string, count: number) => void;
-  removeParticipant: (sessionCode: string, participantId: string) => void;
+  startSession: (name: string, speaker: string) => Promise<Session>;
+  joinSession: (sessionCode: string) => Promise<void>;
+  endSession: () => Promise<void>;
+  leaveSession: () => Promise<void>;
+  updateListenerCount: (sessionId: string, count: number) => Promise<void>;
+  removeParticipant: (sessionCode: string, participantId: string) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -40,54 +39,23 @@ const generateSessionCode = () => {
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
-  const [db] = useState(() => new SessionDB());
 
-  // Initialize database and load sessions
+  // Load sessions from server
   useEffect(() => {
-    const initDB = async () => {
+    const loadSessions = async () => {
       try {
-        await db.init();
-        const loadedSessions = await db.getSessions();
-        console.log('Loaded sessions from IndexedDB:', loadedSessions);
+        const response = await fetch('/api/sessions');
+        const loadedSessions = await response.json();
+        console.log('Loaded sessions from server:', loadedSessions);
         setSessions(loadedSessions);
       } catch (error) {
-        console.error('Error initializing database:', error);
+        console.error('Error loading sessions:', error);
       }
     };
-    initDB();
-  }, [db]);
+    loadSessions();
+  }, []);
 
-  // Save sessions to IndexedDB whenever they change
-  useEffect(() => {
-    const saveSessions = async () => {
-      try {
-        console.log('Saving sessions to IndexedDB:', sessions);
-        for (const session of sessions) {
-          await db.saveSession(session);
-        }
-      } catch (error) {
-        console.error('Error saving sessions to IndexedDB:', error);
-      }
-    };
-    saveSessions();
-  }, [sessions, db]);
-
-  // Save current session to IndexedDB whenever it changes
-  useEffect(() => {
-    const saveCurrentSession = async () => {
-      try {
-        if (currentSession) {
-          console.log('Saving current session to IndexedDB:', currentSession);
-          await db.saveSession(currentSession);
-        }
-      } catch (error) {
-        console.error('Error saving current session to IndexedDB:', error);
-      }
-    };
-    saveCurrentSession();
-  }, [currentSession, db]);
-
-  const startSession = useCallback((name: string, speaker: string) => {
+  const startSession = useCallback(async (name: string, speaker: string) => {
     const sessionId = name.toLowerCase().replace(/\s+/g, '-');
     const sessionCode = generateSessionCode();
     console.log('Starting new session with code:', sessionCode);
@@ -105,25 +73,38 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     console.log('Creating new session:', newSession);
 
-    // Save to IndexedDB first
-    db.saveSession(newSession).then(() => {
-      console.log('Successfully saved new session to IndexedDB');
-    }).catch(error => {
-      console.error('Error saving new session to IndexedDB:', error);
-    });
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newSession),
+      });
 
-    setSessions(prev => {
-      const newSessions = [...prev, newSession];
-      console.log('Updated sessions after start:', newSessions);
-      return newSessions;
-    });
-    
-    setCurrentSession(newSession);
+      if (!response.ok) {
+        throw new Error('Failed to save session');
+      }
 
-    return newSession;
-  }, [db]);
+      const savedSession = await response.json();
+      console.log('Successfully saved new session:', savedSession);
 
-  const endSession = useCallback(() => {
+      setSessions(prev => {
+        const newSessions = [...prev, savedSession];
+        console.log('Updated sessions after start:', newSessions);
+        return newSessions;
+      });
+      
+      setCurrentSession(savedSession);
+
+      return savedSession;
+    } catch (error) {
+      console.error('Error saving session:', error);
+      throw error;
+    }
+  }, []);
+
+  const endSession = useCallback(async () => {
     if (currentSession) {
       const updatedSession: Session = {
         ...currentSession,
@@ -131,66 +112,116 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         endedAt: new Date()
       };
       
-      setSessions(prev => 
-        prev.map(session => 
-          session.sessionCode === currentSession.sessionCode ? updatedSession : session
-        )
-      );
-      setCurrentSession(null);
+      try {
+        const response = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updatedSession),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to update session');
+        }
+
+        const savedSession = await response.json();
+        
+        setSessions(prev => 
+          prev.map(session => 
+            session.sessionCode === currentSession.sessionCode ? savedSession : session
+          )
+        );
+        setCurrentSession(null);
+      } catch (error) {
+        console.error('Error ending session:', error);
+        throw error;
+      }
     }
   }, [currentSession]);
 
-  const updateListenerCount = useCallback((sessionId: string, count: number) => {
-    setSessions(prev => 
-      prev.map(session => 
-        session.id === sessionId 
-          ? { ...session, listeners: count }
-          : session
-      )
-    );
-  }, []);
+  const updateListenerCount = useCallback(async (sessionId: string, count: number) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
 
-  const removeParticipant = useCallback((sessionCode: string, participantId: string) => {
+    const updatedSession: Session = {
+      ...session,
+      listeners: count
+    };
+
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedSession),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update session');
+      }
+
+      const savedSession = await response.json();
+      
+      setSessions(prev => 
+        prev.map(s => 
+          s.id === sessionId ? savedSession : s
+        )
+      );
+    } catch (error) {
+      console.error('Error updating listener count:', error);
+      throw error;
+    }
+  }, [sessions]);
+
+  const removeParticipant = useCallback(async (sessionCode: string, participantId: string) => {
     console.log('Removing participant:', { sessionCode, participantId });
     
-    setSessions(prev => {
-      const newSessions = prev.map(session => {
-        if (session.sessionCode === sessionCode) {
-          console.log('Updating session:', session);
-          const updatedSession = {
-            ...session,
-            participants: session.participants.filter(p => p !== participantId),
-            listeners: Math.max(0, session.listeners - 1)
-          };
-          console.log('Updated session:', updatedSession);
-          return updatedSession;
-        }
-        return session;
+    const session = sessions.find(s => s.sessionCode === sessionCode);
+    if (!session) return;
+
+    const updatedSession: Session = {
+      ...session,
+      participants: session.participants.filter(p => p !== participantId),
+      listeners: Math.max(0, session.listeners - 1)
+    };
+
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedSession),
       });
-      console.log('Updated sessions:', newSessions);
-      return newSessions;
-    });
 
-    setCurrentSession(prev => {
-      if (prev?.sessionCode === sessionCode) {
-        console.log('Updating current session:', prev);
-        const updatedSession = {
-          ...prev,
-          participants: prev.participants.filter(p => p !== participantId),
-          listeners: Math.max(0, prev.listeners - 1)
-        };
-        console.log('Updated current session:', updatedSession);
-        return updatedSession;
+      if (!response.ok) {
+        throw new Error('Failed to update session');
       }
-      return prev;
-    });
-  }, []);
 
-  const leaveSession = useCallback(() => {
+      const savedSession = await response.json();
+      
+      setSessions(prev => 
+        prev.map(s => 
+          s.sessionCode === sessionCode ? savedSession : s
+        )
+      );
+
+      setCurrentSession(prev => 
+        prev?.sessionCode === sessionCode ? savedSession : prev
+      );
+    } catch (error) {
+      console.error('Error removing participant:', error);
+      throw error;
+    }
+  }, [sessions]);
+
+  const leaveSession = useCallback(async () => {
     if (currentSession) {
       console.log('Leaving session:', currentSession);
       if (currentSession.speaker !== 'You') {
-        removeParticipant(currentSession.sessionCode, 'You');
+        await removeParticipant(currentSession.sessionCode, 'You');
       }
       setCurrentSession(null);
     }
@@ -207,82 +238,92 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     if (currentSession) {
       console.log('Leaving current session before joining new one:', currentSession);
       if (currentSession.speaker !== 'You') {
-        removeParticipant(currentSession.sessionCode, 'You');
+        await removeParticipant(currentSession.sessionCode, 'You');
       }
       setCurrentSession(null);
     }
 
-    // Try to find the session in IndexedDB
-    let session = await db.getSession(sessionCode);
-    
-    if (!session) {
-      console.error('Session not found for code:', sessionCode);
-      throw new Error('Session not found');
-    }
-
-    console.log('Found session in IndexedDB:', session);
-
-    // Check if the session is actually ended
-    if (session.status === 'ended' && session.endedAt) {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      if (session.endedAt > oneHourAgo) {
-        // If the session was ended less than an hour ago, reactivate it
-        const reactivatedSession: Session = {
-          ...session,
-          status: 'active' as const,
-          endedAt: undefined
-        };
-        console.log('Reactivating ended session:', reactivatedSession);
-        await db.saveSession(reactivatedSession);
-        session = reactivatedSession;
-      } else {
-        throw new Error('Session has ended');
+    try {
+      const response = await fetch(`/api/sessions?code=${sessionCode}`);
+      if (!response.ok) {
+        throw new Error('Session not found');
       }
-    }
 
-    // Check if user is already in this session
-    if (session.participants.includes('You')) {
-      console.log('User is already in this session, updating current session');
-      setCurrentSession(session);
-      return;
-    }
+      let session = await response.json();
+      console.log('Found session:', session);
 
-    const updatedSession: Session = {
-      ...session,
-      participants: [...session.participants, 'You'],
-      listeners: session.listeners + 1
-    };
-    
-    console.log('Updating session:', updatedSession);
-    
-    // Save to IndexedDB first
-    await db.saveSession(updatedSession);
-    console.log('Successfully saved updated session to IndexedDB');
-    
-    // Update both sessions and currentSession states
-    setSessions(prev => {
-      const newSessions = prev.map(s => 
-        s.sessionCode === session.sessionCode ? updatedSession : s
+      // Check if the session is actually ended
+      if (session.status === 'ended' && session.endedAt) {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        if (new Date(session.endedAt) > oneHourAgo) {
+          // If the session was ended less than an hour ago, reactivate it
+          const reactivatedSession: Session = {
+            ...session,
+            status: 'active' as const,
+            endedAt: undefined
+          };
+          console.log('Reactivating ended session:', reactivatedSession);
+          
+          const reactivateResponse = await fetch('/api/sessions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(reactivatedSession),
+          });
+
+          if (!reactivateResponse.ok) {
+            throw new Error('Failed to reactivate session');
+          }
+
+          session = await reactivateResponse.json();
+        } else {
+          throw new Error('Session has ended');
+        }
+      }
+
+      // Check if user is already in this session
+      if (session.participants.includes('You')) {
+        console.log('User is already in this session, updating current session');
+        setCurrentSession(session);
+        return;
+      }
+
+      const updatedSession: Session = {
+        ...session,
+        participants: [...session.participants, 'You'],
+        listeners: session.listeners + 1
+      };
+      
+      console.log('Updating session:', updatedSession);
+      
+      const updateResponse = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedSession),
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error('Failed to update session');
+      }
+
+      const savedSession = await updateResponse.json();
+      console.log('Successfully saved updated session:', savedSession);
+      
+      setSessions(prev => 
+        prev.map(s => 
+          s.sessionCode === session.sessionCode ? savedSession : s
+        )
       );
-      console.log('Updated sessions:', newSessions);
-      return newSessions;
-    });
 
-    setCurrentSession(updatedSession);
-  }, [currentSession, db, removeParticipant]);
-
-  // Add navigation event listener to clear current session
-  useEffect(() => {
-    const handleNavigation = () => {
-      if (currentSession) {
-        console.log('Navigation detected, clearing current session');
-        setCurrentSession(null);
-      }
-    };
-
-    window.addEventListener('popstate', handleNavigation);
-    return () => window.removeEventListener('popstate', handleNavigation);
-  }, [currentSession]);
+      setCurrentSession(savedSession);
+    } catch (error) {
+      console.error('Error joining session:', error);
+      throw error;
+    }
+  }, [currentSession, removeParticipant]);
 
   return (
     <SessionContext.Provider value={{
