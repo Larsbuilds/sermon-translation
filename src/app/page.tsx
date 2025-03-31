@@ -35,14 +35,15 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-100 p-8">
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Sermon Translation System</h1>
+        <h1 className="text-4xl font-bold text-gray-900 mb-2">Sermon Translation System</h1>
+        <p className="text-gray-600 mb-8">Real-time translation for sermons and presentations</p>
         
         {/* Session Setup */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Session Setup</h2>
-          <div className="flex gap-4 items-end">
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
+          <h2 className="text-2xl font-semibold text-gray-800 mb-6">Session Setup</h2>
+          <div className="flex flex-col md:flex-row gap-6 items-end">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Session ID
@@ -51,7 +52,7 @@ export default function Home() {
                 type="text"
                 value={sessionId}
                 onChange={(e) => setSessionId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 placeholder="Enter or generate session ID"
               />
             </div>
@@ -62,7 +63,7 @@ export default function Home() {
               <select
                 value={isMain ? 'main' : 'listener'}
                 onChange={(e) => setIsMain(e.target.value === 'main')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               >
                 <option value="main">Main Device (Speaker)</option>
                 <option value="listener">Listener Device</option>
@@ -70,7 +71,7 @@ export default function Home() {
             </div>
             <button
               onClick={handleStartSession}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105 shadow-md"
             >
               Start Session
             </button>
@@ -79,14 +80,23 @@ export default function Home() {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-8">
-            {error}
+          <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg mb-8">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm">{error}</p>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Device Manager */}
         {sessionId && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
             <DeviceManager
               isMain={isMain}
               sessionId={sessionId}
@@ -99,8 +109,7 @@ export default function Home() {
 
         {/* Audio Controls */}
         {orchestrationClient && (
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">Audio Controls</h2>
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
             <AudioCapture
               onAudioData={(frequencyData, timeData) => {
                 if (orchestrationClient.isMainDevice()) {
@@ -111,6 +120,12 @@ export default function Home() {
                   }
                   orchestrationClient.sendTranslation(floatData);
                 }
+              }}
+              onBufferReady={(buffer) => {
+                // Handle buffer ready
+              }}
+              onQualityUpdate={(metrics) => {
+                // Handle quality update
               }}
               onError={handleError}
               isActive={orchestrationClient.isMainDevice()}
