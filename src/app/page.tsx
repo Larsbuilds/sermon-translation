@@ -6,6 +6,9 @@ import StartSessionModal from './components/sessions/StartSessionModal';
 import SessionCodeDisplay from './components/sessions/SessionCodeDisplay';
 import { useRouter } from 'next/navigation';
 
+// Add dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export default function Home() {
   const { currentSession } = useSession();
   const [showStartModal, setShowStartModal] = useState(false);
