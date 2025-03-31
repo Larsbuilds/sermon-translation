@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useSession } from '@/contexts/SessionContext';
 import { useRouter } from 'next/navigation';
 
@@ -13,13 +13,6 @@ export default function SessionCodeDisplay({ isSpeaker }: SessionCodeDisplayProp
   const [error, setError] = useState('');
   const { currentSession, joinSession } = useSession();
   const router = useRouter();
-
-  useEffect(() => {
-    // Only attempt to join if we have a valid code
-    if (code && code.length === 6) {
-      handleJoinSession();
-    }
-  }, [code]);
 
   const handleJoinSession = async () => {
     try {
