@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useSession } from './contexts/SessionContext';
+import { useSession } from '@/contexts/SessionContext';
 import StartSessionModal from './components/sessions/StartSessionModal';
 import SessionCodeDisplay from './components/sessions/SessionCodeDisplay';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const { sessions } = useSession();
+  const { currentSession } = useSession();
   const [showStartModal, setShowStartModal] = useState(false);
   const router = useRouter();
 
