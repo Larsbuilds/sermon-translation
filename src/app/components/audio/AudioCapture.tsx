@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { setupAudioAnalyzer, getAudioData, cleanupAudioAnalyzer, AudioAnalyzerResult } from '../../../lib/audio/analyzer';
-import { calculateAudioQuality, AudioQualityMetrics } from '../../../lib/audio/quality';
-import { AudioBuffer, AudioBufferConfig } from '../../../lib/audio/buffer';
+import { calculateAudioQuality } from '../../../lib/audio/quality';
+import { AudioBuffer } from '../../../lib/audio/buffer';
+import { AudioQualityMetrics } from '../../../types/audio';
 import AudioVisualizer from './AudioVisualizer';
 
 interface AudioCaptureProps {
@@ -30,42 +31,7 @@ export default function AudioCapture({
   const animationFrameRef = useRef<number>();
   const audioBufferRef = useRef<AudioBuffer | null>(null);
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      analyzerRef.current = setupAudioAnalyzer(stream);
-      
-      // Initialize audio buffer
-      const audioContext = analyzerRef.current.audioContext;
-      audioBufferRef.current = new AudioBuffer({
-        bufferSize: 4096, // 4KB buffer
-        overlap: 1024,    // 1KB overlap
-        sampleRate: audioContext.sampleRate
-      });
-
-      setIsRecording(true);
-      startAnalysis();
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error('Failed to start recording'));
-    }
-  };
-
-  const stopRecording = () => {
-    if (analyzerRef.current) {
-      cleanupAudioAnalyzer(analyzerRef.current);
-      analyzerRef.current = null;
-    }
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    if (audioBufferRef.current) {
-      audioBufferRef.current.reset();
-      audioBufferRef.current = null;
-    }
-    setIsRecording(false);
-  };
-
-  const startAnalysis = () => {
+  const startAnalysis = useCallback(() => {
     if (!analyzerRef.current || !isActive) return;
 
     const { analyser, dataArray } = analyzerRef.current;
@@ -101,7 +67,42 @@ export default function AudioCapture({
     onAudioData?.(frequencyData, timeData);
     
     animationFrameRef.current = requestAnimationFrame(startAnalysis);
-  };
+  }, [isActive, onAudioData, onBufferReady, onQualityUpdate]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      analyzerRef.current = setupAudioAnalyzer(stream);
+      
+      // Initialize audio buffer
+      const audioContext = analyzerRef.current.audioContext;
+      audioBufferRef.current = new AudioBuffer({
+        bufferSize: 4096, // 4KB buffer
+        overlap: 1024,    // 1KB overlap
+        sampleRate: audioContext.sampleRate
+      });
+
+      setIsRecording(true);
+      startAnalysis();
+    } catch (error) {
+      onError?.(error instanceof Error ? error : new Error('Failed to start recording'));
+    }
+  }, [onError, startAnalysis]);
+
+  const stopRecording = useCallback(() => {
+    if (analyzerRef.current) {
+      cleanupAudioAnalyzer(analyzerRef.current);
+      analyzerRef.current = null;
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    if (audioBufferRef.current) {
+      audioBufferRef.current.reset();
+      audioBufferRef.current = null;
+    }
+    setIsRecording(false);
+  }, []);
 
   useEffect(() => {
     if (isActive && !isRecording) {
@@ -113,7 +114,7 @@ export default function AudioCapture({
     return () => {
       stopRecording();
     };
-  }, [isActive]);
+  }, [isActive, isRecording, startRecording, stopRecording]);
 
   return (
     <div className="w-full max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">

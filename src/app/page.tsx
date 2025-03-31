@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import AudioCapture from './components/audio/AudioCapture';
 import DeviceManager from './components/device/DeviceManager';
 import { TranslationOrchestrationClient } from '../lib/orchestration/client';
+import { AudioQualityMetrics } from '../types/audio';
 
 export default function Home() {
   const [isMain, setIsMain] = useState(false);
@@ -32,6 +33,21 @@ export default function Home() {
 
   const handleError = (error: Error) => {
     setError(error.message);
+  };
+
+  const handleAudioData = (frequencyData: Uint8Array, timeData: Uint8Array) => {
+    // Handle audio data processing
+    console.log('Received audio data:', { frequencyData, timeData });
+  };
+
+  const handleBufferReady = (buffer: Float32Array) => {
+    // Handle buffer ready for translation
+    console.log('Buffer ready for translation:', buffer);
+  };
+
+  const handleQualityUpdate = (metrics: AudioQualityMetrics) => {
+    // Handle quality metrics update
+    console.log('Audio quality metrics:', metrics);
   };
 
   return (
@@ -111,24 +127,11 @@ export default function Home() {
         {orchestrationClient && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
             <AudioCapture
-              onAudioData={(frequencyData, timeData) => {
-                if (orchestrationClient.isMainDevice()) {
-                  // Convert the audio data to Float32Array for translation
-                  const floatData = new Float32Array(timeData.length);
-                  for (let i = 0; i < timeData.length; i++) {
-                    floatData[i] = (timeData[i] - 128) / 128.0;
-                  }
-                  orchestrationClient.sendTranslation(floatData);
-                }
-              }}
-              onBufferReady={(buffer) => {
-                // Handle buffer ready
-              }}
-              onQualityUpdate={(metrics) => {
-                // Handle quality update
-              }}
+              onAudioData={handleAudioData}
+              onBufferReady={handleBufferReady}
+              onQualityUpdate={handleQualityUpdate}
               onError={handleError}
-              isActive={orchestrationClient.isMainDevice()}
+              isActive={true}
             />
           </div>
         )}
