@@ -13,6 +13,18 @@ export default function AudioVisualizer({ isActive }: AudioVisualizerProps) {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
+  const cleanup = () => {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop());
+    }
+    if (audioContext && audioContext.state !== 'closed') {
+      audioContext.close();
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  };
+
   useEffect(() => {
     if (isActive) {
       const setupAudio = async () => {
@@ -34,28 +46,10 @@ export default function AudioVisualizer({ isActive }: AudioVisualizerProps) {
 
       setupAudio();
     } else {
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-      }
-      if (audioContext) {
-        audioContext.close();
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      cleanup();
     }
 
-    return () => {
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-      }
-      if (audioContext) {
-        audioContext.close();
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
+    return cleanup;
   }, [isActive]);
 
   useEffect(() => {
@@ -102,6 +96,12 @@ export default function AudioVisualizer({ isActive }: AudioVisualizerProps) {
     };
 
     draw();
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
   }, [isActive, analyser]);
 
   return (
