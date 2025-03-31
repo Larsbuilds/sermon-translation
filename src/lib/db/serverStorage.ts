@@ -1,12 +1,10 @@
-import { Session } from '@/app/contexts/SessionContext';
+import { Session as SessionModel } from './models/Session';
+import connectDB from './mongodb';
 
 class ServerStorage {
   private static instance: ServerStorage;
-  private sessions: Map<string, Session>;
 
-  private constructor() {
-    this.sessions = new Map();
-  }
+  private constructor() {}
 
   public static getInstance(): ServerStorage {
     if (!ServerStorage.instance) {
@@ -15,32 +13,40 @@ class ServerStorage {
     return ServerStorage.instance;
   }
 
-  async saveSession(session: Session): Promise<void> {
-    console.log('Saving session to server:', session);
-    this.sessions.set(session.sessionCode, session);
+  async saveSession(session: any): Promise<void> {
+    console.log('Saving session to MongoDB:', session);
+    await connectDB();
+    await SessionModel.findOneAndUpdate(
+      { sessionCode: session.sessionCode },
+      session,
+      { upsert: true, new: true }
+    );
   }
 
-  async getSession(sessionCode: string): Promise<Session | null> {
-    console.log('Getting session from server with code:', sessionCode);
-    const session = this.sessions.get(sessionCode);
+  async getSession(sessionCode: string): Promise<any | null> {
+    console.log('Getting session from MongoDB with code:', sessionCode);
+    await connectDB();
+    const session = await SessionModel.findOne({ sessionCode });
     if (session) {
-      console.log('Found session on server:', session);
-      return session;
+      console.log('Found session in MongoDB:', session);
+      return session.toObject();
     }
-    console.log('No session found on server with code:', sessionCode);
+    console.log('No session found in MongoDB with code:', sessionCode);
     return null;
   }
 
-  async getAllSessions(): Promise<Session[]> {
-    console.log('Getting all sessions from server');
-    const sessions = Array.from(this.sessions.values());
-    console.log('Retrieved sessions from server:', sessions);
-    return sessions;
+  async getAllSessions(): Promise<any[]> {
+    console.log('Getting all sessions from MongoDB');
+    await connectDB();
+    const sessions = await SessionModel.find({});
+    console.log('Retrieved sessions from MongoDB:', sessions);
+    return sessions.map(session => session.toObject());
   }
 
   async deleteSession(sessionCode: string): Promise<void> {
-    console.log('Deleting session from server with code:', sessionCode);
-    this.sessions.delete(sessionCode);
+    console.log('Deleting session from MongoDB with code:', sessionCode);
+    await connectDB();
+    await SessionModel.deleteOne({ sessionCode });
   }
 }
 
