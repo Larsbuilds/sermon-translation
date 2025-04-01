@@ -6,17 +6,19 @@ dockerfilePath = "Dockerfile"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "redis-server --daemonize yes && npm run start"
+startCommand = "redis-server --daemonize yes && sleep 5 && npm run start"
 healthcheckPath = "/health"
 sleepApplication = false
 multiRegionConfig = { europe-west4-drams3a = { numReplicas = 1 } }
 restartPolicyType = "ON_FAILURE"
 healthcheckTimeout = 30
 healthcheckInterval = 10
-healthcheckStartPeriod = 60
+healthcheckStartPeriod = 120
 restartPolicyMaxRetries = 10
 
 [deploy.env]
 NODE_ENV = "production"
 NODE_OPTIONS = "--experimental-specifier-resolution=node"
-REDIS_URL = "redis://localhost:6379" 
+REDIS_URL = "redis://localhost:6379"
+WS_PORT = "3001"
+WS_HOST = "0.0.0.0" 
