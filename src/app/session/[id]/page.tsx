@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from '../../contexts/SessionContext';
 import AudioCapture from '../../components/audio/AudioCapture';
+import AudioPlayback from '../../components/audio/AudioPlayback';
 import SessionCodeDisplay from '../../components/sessions/SessionCodeDisplay';
 import { useRouter } from 'next/navigation';
 
@@ -79,12 +80,16 @@ export default function SessionPage({ params }: PageProps) {
             {/* Audio Controls */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Audio Controls</h2>
-              <AudioCapture
-                isActive={true}
-                isSpeaker={isSpeaker}
-                onError={(error) => console.error('Audio error:', error)}
-                sessionId={currentSession.id}
-              />
+              {isSpeaker ? (
+                <AudioCapture
+                  sessionId={currentSession.id}
+                  isActive={true}
+                />
+              ) : (
+                <AudioPlayback
+                  sessionId={currentSession.id}
+                />
+              )}
             </div>
           </div>
 
