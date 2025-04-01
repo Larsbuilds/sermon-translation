@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:ws": "tsc -p tsconfig.server.json",
-    "start": "concurrently \"next start\" \"node dist/server/websocket.js\"",
+    "start": "concurrently \"PORT=$PORT next start\" \"node dist/server/websocket.js\"",
     "ws": "node dist/server/websocket.js",
     "lint": "next lint"
   },
