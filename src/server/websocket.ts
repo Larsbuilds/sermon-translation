@@ -86,7 +86,7 @@ server.on('upgrade', (request, socket, head) => {
   });
 });
 
-const PORT = process.env.WS_PORT || 3001;
+const PORT = parseInt(process.env.WS_PORT || '3001', 10);
 const HOST = process.env.WS_HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
