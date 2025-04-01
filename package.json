@@ -6,10 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "build:ws": "tsc -p tsconfig.server.json",
-    "start": "next start",
+    "start": "concurrently \"next start\" \"node dist/server/websocket.js\"",
     "ws": "node dist/server/websocket.js",
-    "lint": "next lint",
-    "ws": "node dist/server/websocket.js"
+    "lint": "next lint"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",
@@ -25,6 +24,7 @@
     "@vercel/edge": "^1.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "concurrently": "^9.1.2",
     "dotenv": "^16.4.7",
     "lucide-react": "^0.486.0",
     "mongoose": "^8.13.1",
