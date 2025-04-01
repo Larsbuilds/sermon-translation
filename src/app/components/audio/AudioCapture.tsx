@@ -7,7 +7,8 @@ import { AudioBuffer } from '../../../lib/audio/buffer';
 import { AudioQualityMetrics } from '../../../types/audio';
 import AudioVisualizer from './AudioVisualizer';
 import { useSession } from '../../contexts/SessionContext';
-import { toast } from 'sonner';
+import { Button } from '../../../components/ui/button';
+import { getWebSocketUrl } from '../../../config/websocket';
 
 interface AudioCaptureProps {
   onAudioData?: (frequencyData: Uint8Array, timeData: Uint8Array) => void;
@@ -34,9 +35,7 @@ export default function AudioCapture({
   const [isMuted, setIsMuted] = useState(false);
   const [audioQuality, setAudioQuality] = useState<AudioQualityMetrics | null>(null);
   const [error, setError] = useState<Error | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
-  const [timeData, setTimeData] = useState<Uint8Array | null>(null);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyzerRef = useRef<AnalyserNode | null>(null);
@@ -44,86 +43,10 @@ export default function AudioCapture({
   const animationFrameRef = useRef<number>();
   const chunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const isMountedRef = useRef(true);
+  const websocketRef = useRef<WebSocket | null>(null);
 
   const currentSession = sessionId ? sessions.find(s => s.id === sessionId) : null;
-  const participants = currentSession?.listenerCount || 0;
-
-  // Add cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-      cleanupAudioResources();
-    };
-  }, []);
-
-  // Add a new effect to handle initial microphone permission request
-  useEffect(() => {
-    const requestMicrophonePermission = async () => {
-      if (!isMountedRef.current) return;
-      
-      try {
-        setIsInitializing(true);
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 44100,
-            channelCount: 1
-          } 
-        });
-        
-        if (!isMountedRef.current) {
-          stream.getTracks().forEach(track => track.stop());
-          return;
-        }
-
-        // Store the stream for later use
-        mediaStreamRef.current = stream;
-        toast.success('Microphone access granted');
-      } catch (err) {
-        if (!isMountedRef.current) return;
-        
-        const error = err instanceof Error ? err : new Error('Failed to access microphone');
-        if (error.name === 'NotAllowedError') {
-          toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
-        } else if (error.name === 'NotFoundError') {
-          toast.error('No microphone found. Please connect a microphone and try again.');
-        } else {
-          toast.error('Failed to access microphone: ' + error.message);
-        }
-        setError(error);
-      } finally {
-        if (isMountedRef.current) {
-          setIsInitializing(false);
-        }
-      }
-    };
-
-    // Request microphone permission immediately when component mounts
-    requestMicrophonePermission();
-  }, []); // Empty dependency array means this runs once on mount
-
-  // Effect to handle audio recording state
-  useEffect(() => {
-    if (!isMountedRef.current) return;
-
-    if (isActive) {
-      startRecording().catch(err => {
-        if (!isMountedRef.current) return;
-        console.error('Failed to start recording:', err);
-        onError?.(err);
-      });
-    } else {
-      cleanupAudioResources();
-    }
-
-    return () => {
-      if (!isMountedRef.current) return;
-      cleanupAudioResources();
-    };
-  }, [isActive]);
+  const participants = currentSession?.listeners || 0;
 
   const handleQuitCall = useCallback(() => {
     if (sessionId) {
@@ -132,199 +55,138 @@ export default function AudioCapture({
   }, [sessionId, endSession]);
 
   const cleanupAudioResources = useCallback(() => {
-    if (!isMountedRef.current) return;
-
-    // Stop and cleanup MediaRecorder
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-    }
-    mediaRecorderRef.current = null;
-
-    // Cleanup AudioContext
-    if (audioContextRef.current?.state !== 'closed') {
-      audioContextRef.current?.close();
-    }
-    audioContextRef.current = null;
-
-    // Cleanup analyzer
-    analyzerRef.current = null;
-
-    // Cleanup audio buffer
-    audioBufferRef.current = null;
-
-    // Cleanup media stream
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-
     // Cancel animation frame
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = undefined;
     }
 
-    // Reset states
+    // Stop and cleanup MediaRecorder
+    const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+
+    // Close WebSocket connection
+    if (websocketRef.current) {
+      websocketRef.current.close();
+    }
+
+    // Close AudioContext if it exists and is not already closed
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      try {
+        audioContextRef.current.close();
+      } catch (err) {
+        console.warn('Error closing AudioContext:', err);
+      }
+    }
+
+    // Reset refs
+    mediaRecorderRef.current = null;
+    audioContextRef.current = null;
+    websocketRef.current = null;
+
+    // Reset state
     setIsRecording(false);
     setIsConnected(false);
-    setFrequencyData(null);
-    setTimeData(null);
-    setError(null);
+    setIsMuted(false);
+    setAudioQuality(null);
   }, []);
 
-  const handleAudioQuality = (quality: AudioQualityMetrics) => {
-    setAudioQuality(quality);
-    onQualityUpdate?.(quality);
-
-    // Check for poor audio quality conditions
-    if (quality.signalStrength < 0.3) {
-      toast.warning('Audio signal is weak. Please check your microphone.');
-    }
-    if (quality.noiseLevel > 0.7) {
-      toast.warning('High background noise detected. Please move to a quieter location.');
-    }
-    if (quality.clarity < 0.4) {
-      toast.warning('Audio clarity is low. Please speak more clearly or check your microphone.');
+  const requestPermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setHasPermission(true);
+      setupAudioContext(stream);
+    } catch (error) {
+      console.error('Error requesting microphone permission:', error);
     }
   };
 
-  const startRecording = useCallback(async () => {
-    if (!isMountedRef.current) return;
+  const setupAudioContext = (stream: MediaStream) => {
+    audioContextRef.current = new AudioContext();
+    const source = audioContextRef.current.createMediaStreamSource(stream);
+    analyzerRef.current = audioContextRef.current.createAnalyser();
+    analyzerRef.current.fftSize = 2048;
+    source.connect(analyzerRef.current);
+  };
 
+  const startRecording = async () => {
     try {
-      setIsInitializing(true);
-      // Cleanup any existing resources first
-      cleanupAudioResources();
-
-      // Use existing stream if available, otherwise request new one
-      let stream = mediaStreamRef.current;
-      if (!stream) {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 44100,
-            channelCount: 1
-          } 
-        });
-        mediaStreamRef.current = stream;
+      if (!sessionId) {
+        throw new Error('Session ID is required');
       }
-      
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-      mediaRecorderRef.current = mediaRecorder;
 
-      // Set up audio context and analyzer
-      const audioContext = new AudioContext({
-        sampleRate: 44100,
-        latencyHint: 'interactive'
-      });
-      audioContextRef.current = audioContext;
+      // Request microphone permission first
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setHasPermission(true);
+      setStream(stream);
+
+      // Create audio context and analyzer
+      const audioContext = new AudioContext();
       const source = audioContext.createMediaStreamSource(stream);
       const analyzer = audioContext.createAnalyser();
       analyzer.fftSize = 2048;
-      analyzer.smoothingTimeConstant = 0.8;
-      analyzer.minDecibels = -90;
-      analyzer.maxDecibels = -10;
-      analyzerRef.current = analyzer;
       source.connect(analyzer);
 
-      // Set up audio buffer
-      audioBufferRef.current = new AudioBuffer();
+      // Create WebSocket connection
+      console.log('Connecting to WebSocket server...');
+      const ws = new WebSocket(getWebSocketUrl(sessionId));
+      websocketRef.current = ws;
 
-      // Handle data available event
-      mediaRecorder.ondataavailable = (event) => {
-        if (!isMountedRef.current) return;
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
+      ws.onopen = () => {
+        console.log('WebSocket connection established');
+        setIsRecording(true);
       };
 
-      // Handle errors from the media stream
-      stream.getAudioTracks().forEach(track => {
-        track.onended = () => {
-          if (!isMountedRef.current) return;
-          setIsConnected(false);
-          toast.error('Audio input device disconnected');
-        };
-        track.onmute = () => {
-          if (!isMountedRef.current) return;
-          setIsMuted(true);
-          toast.warning('Microphone muted');
-        };
-        track.onunmute = () => {
-          if (!isMountedRef.current) return;
-          setIsMuted(false);
-          toast.success('Microphone unmuted');
-        };
-      });
-
-      // Start recording
-      mediaRecorder.start(1000); // Collect data every second
-      setIsRecording(true);
-      setIsConnected(true);
-      toast.success('Recording started');
-
-      // Start animation loop for visualization
-      const animate = () => {
-        if (!isMountedRef.current) return;
-        if (analyzer && isRecording) {
-          const freqData = new Uint8Array(analyzer.frequencyBinCount);
-          const timeData = new Uint8Array(analyzer.frequencyBinCount);
-          analyzer.getByteFrequencyData(freqData);
-          analyzer.getByteTimeDomainData(timeData);
-
-          // Update audio data state
-          setFrequencyData(freqData);
-          setTimeData(timeData);
-
-          // Update audio quality metrics
-          const quality = calculateAudioQuality(freqData, timeData);
-          handleAudioQuality(quality);
-
-          // Send audio data to parent
-          onAudioData?.(freqData, timeData);
-
-          // Add to buffer
-          audioBufferRef.current?.addData(timeData);
-          if (audioBufferRef.current?.isReady()) {
-            onBufferReady?.(audioBufferRef.current.getData());
-          }
-        }
-        animationFrameRef.current = requestAnimationFrame(animate);
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setIsRecording(false);
       };
 
-      animate();
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      
-      const error = err instanceof Error ? err : new Error('Failed to start recording');
-      setError(error);
-      onError?.(error);
-      cleanupAudioResources();
-      
-      // Show specific error messages based on the error type
-      if (error.name === 'NotAllowedError') {
-        toast.error('Microphone access denied. Please allow microphone access in your browser settings.');
-      } else if (error.name === 'NotFoundError') {
-        toast.error('No microphone found. Please connect a microphone and try again.');
-      } else if (error.name === 'NotReadableError') {
-        toast.error('Microphone is in use by another application. Please close other applications using the microphone.');
-      } else {
-        toast.error('Failed to start recording: ' + error.message);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsInitializing(false);
-      }
+      ws.onclose = () => {
+        console.log('WebSocket connection closed');
+        setIsRecording(false);
+      };
+
+      // Start recording loop
+      const bufferLength = analyzer.frequencyBinCount;
+      const frequencyData = new Uint8Array(bufferLength);
+      const timeData = new Uint8Array(bufferLength);
+
+      const record = () => {
+        if (!isRecording || !websocketRef.current) return;
+
+        analyzer.getByteFrequencyData(frequencyData);
+        analyzer.getByteTimeDomainData(timeData);
+
+        if (websocketRef.current.readyState === WebSocket.OPEN) {
+          websocketRef.current.send(JSON.stringify({
+            type: 'audio',
+            frequencyData: Array.from(frequencyData),
+            timeData: Array.from(timeData)
+          }));
+          console.log('Sent audio data:', frequencyData.length, timeData.length);
+        }
+
+        requestAnimationFrame(record);
+      };
+
+      record();
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      setIsRecording(false);
     }
-  }, [cleanupAudioResources, onAudioData, onBufferReady, onError, onQualityUpdate]);
+  };
 
   const stopRecording = useCallback(() => {
     cleanupAudioResources();
+
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
   }, [cleanupAudioResources]);
 
   const toggleMute = useCallback(() => {
@@ -347,7 +209,8 @@ export default function AudioCapture({
 
               // Update audio quality metrics
               const quality = calculateAudioQuality(frequencyData, timeData);
-              handleAudioQuality(quality);
+              setAudioQuality(quality);
+              onQualityUpdate?.(quality);
 
               // Send audio data to parent
               onAudioData?.(frequencyData, timeData);
@@ -366,145 +229,60 @@ export default function AudioCapture({
     }
   }, [isRecording, onAudioData, onBufferReady, onQualityUpdate]);
 
+  useEffect(() => {
+    if (isActive) {
+      startRecording();
+    } else {
+      stopRecording();
+    }
+
+    return () => {
+      stopRecording();
+    };
+  }, [isActive, startRecording, stopRecording]);
+
   return (
-    <div className="space-y-6">
-      {/* Session Status and Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${
-            isInitializing ? 'bg-yellow-500 animate-pulse' :
-            isConnected ? 'bg-green-500' : 'bg-gray-400'
-          }`} />
-          <span className="text-sm font-medium text-gray-700">
-            {isInitializing ? 'Initializing...' :
-             isConnected ? 'Connected' : 'Disconnected'}
-          </span>
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-2">
+        <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span className="text-sm text-gray-600">
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </span>
+      </div>
+      {error && (
+        <div className="text-sm text-red-500">
+          {error.message}
         </div>
-        <div className="flex items-center space-x-4">
-          {/* Mute Button */}
+      )}
+      {hasPermission === false && (
+        <Button
+          onClick={requestPermission}
+          className="px-4 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600"
+        >
+          Allow Microphone Access
+        </Button>
+      )}
+      <AudioVisualizer
+        frequencyData={new Uint8Array(0)}
+        timeData={new Uint8Array(0)}
+        isActive={isRecording}
+      />
+      {isSpeaker && (
+        <div className="flex items-center gap-4">
           <button
             onClick={toggleMute}
-            disabled={isInitializing || !isConnected}
-            className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg transition-colors relative group ${
-              isInitializing ? 'bg-gray-100 text-gray-400 cursor-not-allowed' :
-              isMuted
-                ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-            title={isMuted ? "Click to unmute your microphone" : "Click to mute your microphone"}
+            className={`px-4 py-2 rounded-full ${
+              isMuted ? 'bg-red-500' : 'bg-green-500'
+            } text-white`}
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              {isMuted ? (
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                />
-              ) : (
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                />
-              )}
-            </svg>
-            <span className="text-sm font-medium">
-              {isMuted ? 'Unmute' : 'Mute'}
-            </span>
+            {isMuted ? 'Unmute' : 'Mute'}
           </button>
-
-          {/* Recording Indicator */}
-          {isRecording && (
-            <div className="flex items-center space-x-2 bg-red-50 px-3 py-1.5 rounded-lg shadow-sm">
-              <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm font-medium text-red-700">Recording</span>
-            </div>
-          )}
-
-          {/* Quit Call Button (Speaker Only) */}
-          {isSpeaker && isRecording && (
-            <button
-              onClick={handleQuitCall}
-              className="flex items-center space-x-2 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors relative group"
-              title="End the current session"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-              <span className="text-sm font-medium">Quit Call</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Session Info (Speaker Only) */}
-      {isSpeaker && currentSession && (
-        <div className="bg-white rounded-lg shadow-sm p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-semibold text-gray-900">Your Session</h3>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="text-sm text-gray-600">Active</span>
-            </div>
-          </div>
-          <div className="flex items-center space-x-2 text-sm text-gray-600">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-            <span>{participants} {participants === 1 ? 'Participant' : 'Participants'}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Audio Visualizer */}
-      <div className="bg-gray-50 rounded-lg p-4">
-        <AudioVisualizer 
-          isActive={isRecording} 
-          frequencyData={frequencyData || undefined}
-          timeData={timeData || undefined}
-        />
-      </div>
-
-      {/* Audio Quality Metrics */}
-      {audioQuality && (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-500 mb-1">Signal Strength</div>
-            <div className="text-2xl font-semibold text-gray-900">
-              {Math.round(audioQuality.signalStrength * 100)}%
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-500 mb-1">Noise Level</div>
-            <div className="text-2xl font-semibold text-gray-900">
-              {Math.round(audioQuality.noiseLevel * 100)}%
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-gray-500 mb-1">Clarity</div>
-            <div className="text-2xl font-semibold text-gray-900">
-              {Math.round(audioQuality.clarity * 100)}%
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Error Display */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex items-center text-red-600">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{error.message}</span>
-          </div>
+          <button
+            onClick={handleQuitCall}
+            className="px-4 py-2 bg-red-500 text-white rounded-full"
+          >
+            End Session
+          </button>
         </div>
       )}
     </div>
