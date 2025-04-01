@@ -1,15 +1,20 @@
 [build]
-builder = "nixpacks"
+builder = "DOCKERFILE"
 buildCommand = "npm run build:ws"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npm run ws:prod"
-healthcheckPath = "/"
+runtime = "V2"
+numReplicas = 1
+startCommand = "redis-server --daemonize yes && npm run start"
+healthcheckPath = "/health"
+sleepApplication = false
+multiRegionConfig = { europe-west4-drams3a = { numReplicas = 1 } }
+restartPolicyType = "ON_FAILURE"
 healthcheckTimeout = 100
-restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
 
 [deploy.env]
 NODE_ENV = "production"
-WS_PORT = "3001"
-WS_HOST = "0.0.0.0" 
+NODE_OPTIONS = "--experimental-specifier-resolution=node"
+REDIS_URL = "redis://localhost:6379" 
