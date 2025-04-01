@@ -1,10 +1,14 @@
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import { createServer } from 'http';
 import { config } from 'dotenv';
-import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load environment variables from .env.ws
-config({ path: path.resolve(process.cwd(), '.env.ws') });
+config({ path: resolve(__dirname, '../../.env.ws') });
 
 const wss = new WebSocketServer({ noServer: true });
 
