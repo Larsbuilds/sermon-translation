@@ -10,6 +10,6 @@ restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
 
 [deploy.env]
-NODE_ENV=production
-WS_PORT=3001
-WS_HOST=0.0.0.0 
+NODE_ENV = "production"
+WS_PORT = "3001"
+WS_HOST = "0.0.0.0" 
