@@ -1,0 +1,15 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm run build:ws"
+
+[deploy]
+startCommand = "npm run ws:prod"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+[deploy.env]
+NODE_ENV=production
+WS_PORT=3001
+WS_HOST=0.0.0.0 
