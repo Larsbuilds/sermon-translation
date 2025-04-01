@@ -165,7 +165,8 @@ server.on('request', (req, res) => {
         connections: connections.size,
         host: HOST,
         port: PORT,
-        clientIp: clientIp
+        clientIp: clientIp,
+        redis: redis.status === 'ready' ? 'connected' : 'disconnected'
       };
       
       res.writeHead(200, { 

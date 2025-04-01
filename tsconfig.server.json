@@ -7,7 +7,6 @@
     "lib": ["ESNext"],
     "outDir": "dist/server",
     "rootDir": "src/server",
-    "allowImportingTsExtensions": true,
     "noEmit": false,
     "esModuleInterop": true,
     "strict": true,

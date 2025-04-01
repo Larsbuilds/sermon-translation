@@ -8,7 +8,7 @@ cmds = ["npm ci"]
 cmds = ["npm run build:ws"]
 
 [start]
-cmd = "npm run ws:prod"
+cmd = "redis-server --daemonize yes && npm run ws:prod"
 
 [deploy]
 healthcheckPath = "/"
