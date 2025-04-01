@@ -1,25 +1,28 @@
 [phases.setup]
-nixPkgs = ["nodejs_18", "npm-9_x", "redis"]
+nixPkgs = ['nodejs_20', 'redis']
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = ['npm ci']
 
 [phases.build]
 cmds = ["npm run build:ws"]
 
 [start]
-cmd = "redis-server --daemonize yes && npm run ws:prod"
+cmd = 'npm run start'
 
 [deploy]
-healthcheckPath = "/"
-healthcheckTimeout = 30
-healthcheckInterval = 10
-healthcheckRetries = 3
-healthcheckStartPeriod = 10
+startCommand = 'npm run start'
+healthcheckPath = '/health'
+healthcheckTimeout = 100
+restartPolicyType = 'on_failure'
+restartPolicyMaxRetries = 3
 
 [deploy.env]
 WS_PORT = "3001"
 WS_HOST = "0.0.0.0"
 NODE_ENV = "production"
 NODE_OPTIONS = "--experimental-specifier-resolution=node"
-REDIS_URL = "redis://localhost:6379" 
+REDIS_URL = "redis://localhost:6379"
+
+[deploy.services]
+redis = { type = 'redis' } 
