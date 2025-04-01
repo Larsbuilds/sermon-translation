@@ -90,13 +90,34 @@ wss.on('connection', (ws: WS, req) => {
 
 const server = createServer();
 
-// Add healthcheck endpoint
+// Add healthcheck endpoint and handle all HTTP requests
 server.on('request', (req, res) => {
+  console.log(`Received HTTP request: ${req.method} ${req.url}`);
+  
   if (req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'healthy' }));
+    res.writeHead(200, { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ 
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    }));
     return;
   }
+
+  // Handle 404 for all other routes
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ 
+    error: 'Not Found',
+    path: req.url
+  }));
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  console.error('Server error:', error);
 });
 
 server.on('upgrade', (request, socket, head) => {
@@ -114,4 +135,5 @@ server.listen(PORT, HOST, () => {
   console.log('Environment:', process.env.NODE_ENV);
   console.log('WS_HOST:', process.env.WS_HOST);
   console.log('WS_PORT:', process.env.WS_PORT);
+  console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
 }); 
