@@ -99,7 +99,8 @@ const server = createServer();
 
 // Add healthcheck endpoint and handle all HTTP requests
 server.on('request', (req, res) => {
-  console.log(`Received HTTP request: ${req.method} ${req.url} from ${req.socket.remoteAddress}`);
+  const clientIp = req.socket.remoteAddress;
+  console.log(`Received HTTP request: ${req.method} ${req.url} from ${clientIp}`);
   
   // Add CORS headers to all responses
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -114,27 +115,37 @@ server.on('request', (req, res) => {
   }
 
   if (req.url === '/') {
-    console.log('Healthcheck request received');
-    const healthStatus = {
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      connections: connections.size,
-      host: HOST,
-      port: PORT
-    };
-    
-    res.writeHead(200, { 
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache'
-    });
-    res.end(JSON.stringify(healthStatus));
-    console.log('Healthcheck response sent:', healthStatus);
+    console.log(`Healthcheck request received from ${clientIp}`);
+    try {
+      const healthStatus = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        connections: connections.size,
+        host: HOST,
+        port: PORT,
+        clientIp: clientIp
+      };
+      
+      res.writeHead(200, { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache'
+      });
+      res.end(JSON.stringify(healthStatus));
+      console.log('Healthcheck response sent successfully:', healthStatus);
+    } catch (error) {
+      console.error('Error sending healthcheck response:', error);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        error: 'Internal Server Error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      }));
+    }
     return;
   }
 
   // Handle 404 for all other routes
-  console.log('404 Not Found:', req.url);
+  console.log(`404 Not Found: ${req.url} from ${clientIp}`);
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ 
     error: 'Not Found',
@@ -143,8 +154,18 @@ server.on('request', (req, res) => {
 });
 
 // Handle server errors
-server.on('error', (error) => {
+server.on('error', (error: NodeJS.ErrnoException) => {
   console.error('Server error:', error);
+  // Attempt to restart the server if it fails
+  if (error.code === 'EADDRINUSE') {
+    console.log(`Port ${PORT} is already in use, trying to close existing connections...`);
+    server.close(() => {
+      console.log('Server closed, attempting to restart...');
+      server.listen(PORT, HOST, () => {
+        console.log(`Server restarted successfully on ${HOST}:${PORT}`);
+      });
+    });
+  }
 });
 
 server.on('upgrade', (request, socket, head) => {
@@ -187,4 +208,22 @@ server.listen(PORT, HOST, () => {
   console.log('WS_PORT:', process.env.WS_PORT);
   console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
   console.log('Server is ready to accept connections');
+  
+  // Test the healthcheck endpoint locally
+  const testReq = {
+    method: 'GET',
+    url: '/',
+    headers: { host: `${HOST}:${PORT}` },
+    socket: { remoteAddress: '127.0.0.1' }
+  };
+  const testRes = {
+    writeHead: (status: number, headers: any) => {
+      console.log(`Local healthcheck test response status: ${status}`);
+      console.log('Response headers:', headers);
+    },
+    end: (data: string) => {
+      console.log('Local healthcheck test response data:', data);
+    }
+  };
+  server.emit('request', testReq, testRes);
 }); 
