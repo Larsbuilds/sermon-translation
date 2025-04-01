@@ -156,6 +156,19 @@ server.on('request', (req, res) => {
   }
 
   if (req.url === '/') {
+    console.log(`Root endpoint request received from ${clientIp}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      message: 'WebSocket server is running',
+      endpoints: {
+        health: '/health',
+        websocket: '/ws'
+      }
+    }));
+    return;
+  }
+
+  if (req.url === '/health') {
     console.log(`Healthcheck request received from ${clientIp}`);
     try {
       const healthStatus = {

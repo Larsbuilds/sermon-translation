@@ -1,8 +1,8 @@
 # Use Node.js 20 as specified in package.json
 FROM node:20-slim
 
-# Install Redis
-RUN apt-get update && apt-get install -y redis-server && rm -rf /var/lib/apt/lists/*
+# Install Redis and curl for healthcheck
+RUN apt-get update && apt-get install -y redis-server curl && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -21,6 +21,10 @@ RUN npm run build:ws
 
 # Expose ports
 EXPOSE 3000 3001
+
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3001/health || exit 1
 
 # Start Redis and the application
 CMD ["sh", "-c", "redis-server --daemonize yes && npm run start"] 
