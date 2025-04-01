@@ -12,8 +12,12 @@ const __dirname = dirname(__filename);
 const envPath = resolve(__dirname, '../../.env.ws');
 if (existsSync(envPath)) {
   config({ path: envPath });
+  console.log('Loaded environment variables from .env.ws');
 } else {
   console.log('No .env.ws file found, using default environment variables');
+  // Set default values for required environment variables
+  process.env.WS_PORT = process.env.WS_PORT || '3001';
+  process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
 }
 
 const wss = new WebSocketServer({ noServer: true });
@@ -178,7 +182,7 @@ process.on('SIGUSR2', shutdown);
 
 server.listen(PORT, HOST, () => {
   console.log(`WebSocket server is running on ${HOST}:${PORT}`);
-  console.log('Environment:', process.env.NODE_ENV);
+  console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('WS_HOST:', process.env.WS_HOST);
   console.log('WS_PORT:', process.env.WS_PORT);
   console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
