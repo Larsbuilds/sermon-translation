@@ -88,6 +88,9 @@ wss.on('connection', (ws: WS, req) => {
   });
 });
 
+const PORT = parseInt(process.env.WS_PORT || '3001', 10);
+const HOST = process.env.WS_HOST || '0.0.0.0';
+
 const server = createServer();
 
 // Add healthcheck endpoint and handle all HTTP requests
@@ -127,8 +130,31 @@ server.on('upgrade', (request, socket, head) => {
   });
 });
 
-const PORT = parseInt(process.env.WS_PORT || '3001', 10);
-const HOST = process.env.WS_HOST || '0.0.0.0';
+// Handle graceful shutdown
+const shutdown = () => {
+  console.log('Received shutdown signal, closing server...');
+  
+  // Close all WebSocket connections
+  connections.forEach((sessionConnections, sessionId) => {
+    console.log(`Closing session ${sessionId}`);
+    sessionConnections.forEach((ws) => {
+      if (ws.readyState === WS.OPEN) {
+        ws.close(1000, 'Server shutting down');
+      }
+    });
+  });
+  
+  // Close the HTTP server
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+};
+
+// Handle various termination signals
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+process.on('SIGUSR2', shutdown);
 
 server.listen(PORT, HOST, () => {
   console.log(`WebSocket server is running on ${HOST}:${PORT}`);
