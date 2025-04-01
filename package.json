@@ -8,6 +8,7 @@
     "build:ws": "tsc -p tsconfig.server.json",
     "start": "concurrently \"PORT=$PORT next start\" \"node dist/server/websocket.js\"",
     "ws": "node dist/server/websocket.js",
+    "ws:prod": "node dist/server/websocket.js",
     "lint": "next lint"
   },
   "dependencies": {
