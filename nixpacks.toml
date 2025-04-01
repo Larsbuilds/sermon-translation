@@ -1,0 +1,16 @@
+[phases.setup]
+nixPkgs = ["nodejs_18", "npm-9_x"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build:prod"]
+
+[start]
+cmd = "npm run ws:prod"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+healthcheckInterval = 10 
