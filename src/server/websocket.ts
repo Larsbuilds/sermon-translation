@@ -3,12 +3,18 @@ import { createServer } from 'http';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables from .env.ws
-config({ path: resolve(__dirname, '../../.env.ws') });
+// Load environment variables from .env.ws if it exists
+const envPath = resolve(__dirname, '../../.env.ws');
+if (existsSync(envPath)) {
+  config({ path: envPath });
+} else {
+  console.log('No .env.ws file found, using default environment variables');
+}
 
 const wss = new WebSocketServer({ noServer: true });
 
