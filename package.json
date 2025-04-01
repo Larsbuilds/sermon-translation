@@ -8,7 +8,7 @@
     "build": "next build",
     "build:ws": "tsc -p tsconfig.server.json",
     "start": "concurrently \"PORT=$PORT next start\" \"node --experimental-specifier-resolution=node dist/server/websocket.js\"",
-    "ws": "ts-node --esm src/server/websocket.ts",
+    "ws": "NODE_OPTIONS='--loader ts-node/esm' ts-node --esm src/server/websocket.ts",
     "ws:prod": "node --experimental-specifier-resolution=node dist/server/websocket.js",
     "lint": "next lint"
   },
