@@ -9,8 +9,8 @@
     "build:ws": "rm -rf dist && mkdir -p dist/server && tsc -p tsconfig.server.json && [ -f .env.ws ] && cp .env.ws dist/server/ || true",
     "build:prod": "npm run build:ws && npm ci --omit=dev",
     "start": "concurrently \"PORT=$PORT next start\" \"node --experimental-specifier-resolution=node dist/server/websocket.js\"",
-    "ws": "NODE_OPTIONS='--experimental-specifier-resolution=node' node --loader ts-node/esm src/server/websocket.ts",
-    "ws:prod": "NODE_OPTIONS='--experimental-specifier-resolution=node' node dist/server/websocket.js",
+    "ws": "NODE_OPTIONS='--loader ts-node/esm' ts-node --esm --experimental-specifier-resolution=node src/server/websocket.ts",
+    "ws:prod": "node --experimental-specifier-resolution=node dist/server/websocket.js",
     "lint": "next lint"
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "clsx": "^2.1.1",
     "concurrently": "^9.1.2",
     "dotenv": "^16.4.7",
+    "ioredis": "^5.3.2",
     "lucide-react": "^0.486.0",
     "mongoose": "^8.13.1",
     "next": "14.2.26",

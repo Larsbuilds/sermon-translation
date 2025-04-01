@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["nodejs_18", "npm-9_x"]
+nixPkgs = ["nodejs_18", "npm-9_x", "redis"]
 
 [phases.install]
 cmds = ["npm ci"]
@@ -21,4 +21,5 @@ healthcheckStartPeriod = 10
 WS_PORT = "3001"
 WS_HOST = "0.0.0.0"
 NODE_ENV = "production"
-NODE_OPTIONS = "--experimental-specifier-resolution=node" 
+NODE_OPTIONS = "--experimental-specifier-resolution=node"
+REDIS_URL = "redis://localhost:6379" 

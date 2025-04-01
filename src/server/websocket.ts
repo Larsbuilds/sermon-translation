@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
+import Redis from 'ioredis';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,12 +21,25 @@ if (existsSync(envPath)) {
   process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
 }
 
+// Initialize Redis client
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+redis.on('connect', () => {
+  console.log('Connected to Redis');
+});
+redis.on('error', (error) => {
+  console.error('Redis connection error:', error);
+});
+
 const wss = new WebSocketServer({ noServer: true });
 
 // Store active connections
 const connections = new Map<string, Set<WS>>();
 
-wss.on('connection', (ws: WS, req) => {
+// Redis key prefixes
+const SESSION_PREFIX = 'ws:session:';
+const CONNECTION_PREFIX = 'ws:connection:';
+
+wss.on('connection', async (ws: WS, req) => {
   const url = new URL(req.url || '', `http://${req.headers.host}`);
   const sessionId = url.searchParams.get('sessionId');
   const clientIp = req.socket.remoteAddress;
@@ -39,57 +53,84 @@ wss.on('connection', (ws: WS, req) => {
     return;
   }
 
-  // Add to connections
-  if (!connections.has(sessionId)) {
-    connections.set(sessionId, new Set());
-    console.log(`Created new session: ${sessionId}`);
-  }
-  connections.get(sessionId)!.add(ws);
+  try {
+    // Store session in Redis
+    await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
+      createdAt: new Date().toISOString(),
+      lastActive: new Date().toISOString(),
+      clientIp
+    }));
 
-  console.log(`Client connected to session ${sessionId}`);
-  console.log(`Active sessions: ${connections.size}`);
-  console.log(`Active connections in session ${sessionId}: ${connections.get(sessionId)!.size}`);
+    // Add to connections
+    if (!connections.has(sessionId)) {
+      connections.set(sessionId, new Set());
+      console.log(`Created new session: ${sessionId}`);
+    }
+    connections.get(sessionId)!.add(ws);
 
-  ws.on('message', (data: Buffer) => {
-    try {
-      const parsedData = JSON.parse(data.toString());
-      console.log(`Received message in session ${sessionId}:`, {
-        type: parsedData.type,
-        dataSize: data.length
-      });
-      
-      // Broadcast to all other clients in the same session
+    // Store connection info in Redis
+    const connectionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await redis.set(`${CONNECTION_PREFIX}${connectionId}`, JSON.stringify({
+      sessionId,
+      clientIp,
+      connectedAt: new Date().toISOString()
+    }));
+
+    console.log(`Client connected to session ${sessionId}`);
+    console.log(`Active sessions: ${connections.size}`);
+    console.log(`Active connections in session ${sessionId}: ${connections.get(sessionId)!.size}`);
+
+    ws.on('message', async (data: Buffer) => {
+      try {
+        const parsedData = JSON.parse(data.toString());
+        console.log(`Received message in session ${sessionId}:`, {
+          type: parsedData.type,
+          dataSize: data.length
+        });
+        
+        // Update last active timestamp in Redis
+        await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
+          createdAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          clientIp
+        }));
+        
+        // Broadcast to all other clients in the same session
+        const sessionConnections = connections.get(sessionId);
+        if (sessionConnections) {
+          sessionConnections.forEach((client) => {
+            if (client !== ws && client.readyState === WS.OPEN) {
+              client.send(JSON.stringify(parsedData));
+              console.log(`Broadcasted message to client in session ${sessionId}`);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error handling message:', error);
+      }
+    });
+
+    ws.on('close', async () => {
+      // Remove from connections
       const sessionConnections = connections.get(sessionId);
       if (sessionConnections) {
-        sessionConnections.forEach((client) => {
-          if (client !== ws && client.readyState === WS.OPEN) {
-            client.send(JSON.stringify(parsedData));
-            console.log(`Broadcasted message to client in session ${sessionId}`);
-          }
-        });
+        sessionConnections.delete(ws);
+        if (sessionConnections.size === 0) {
+          connections.delete(sessionId);
+          console.log(`Session ${sessionId} closed - no more connections`);
+        }
       }
-    } catch (error) {
-      console.error('Error handling message:', error);
-    }
-  });
+      console.log(`Client disconnected from session ${sessionId}`);
+      console.log(`Remaining active sessions: ${connections.size}`);
+    });
 
-  ws.on('close', () => {
-    // Remove from connections
-    const sessionConnections = connections.get(sessionId);
-    if (sessionConnections) {
-      sessionConnections.delete(ws);
-      if (sessionConnections.size === 0) {
-        connections.delete(sessionId);
-        console.log(`Session ${sessionId} closed - no more connections`);
-      }
-    }
-    console.log(`Client disconnected from session ${sessionId}`);
-    console.log(`Remaining active sessions: ${connections.size}`);
-  });
-
-  ws.on('error', (error) => {
-    console.error(`WebSocket error in session ${sessionId}:`, error);
-  });
+    ws.on('error', (error) => {
+      console.error(`WebSocket error in session ${sessionId}:`, error);
+    });
+  } catch (error) {
+    console.error('Error handling connection:', error);
+    ws.close(1011, 'Internal server error');
+  }
 });
 
 const PORT = parseInt(process.env.WS_PORT || '3001', 10);
