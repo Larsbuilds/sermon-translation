@@ -21,13 +21,26 @@ if (existsSync(envPath)) {
   process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
 }
 
-// Initialize Redis client
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+// Initialize Redis client with retry strategy
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  retryStrategy: (times: number) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true
+});
+
 redis.on('connect', () => {
   console.log('Connected to Redis');
 });
+
 redis.on('error', (error: Error) => {
   console.error('Redis connection error:', error);
+});
+
+redis.on('ready', () => {
+  console.log('Redis is ready');
 });
 
 const wss = new WebSocketServer({ noServer: true });
@@ -256,29 +269,42 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 process.on('SIGUSR2', shutdown);
 
-server.listen(PORT, HOST, () => {
-  console.log(`WebSocket server is running on ${HOST}:${PORT}`);
-  console.log('Environment:', process.env.NODE_ENV || 'development');
-  console.log('WS_HOST:', process.env.WS_HOST);
-  console.log('WS_PORT:', process.env.WS_PORT);
-  console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
-  console.log('Server is ready to accept connections');
-  
-  // Test the healthcheck endpoint locally
-  const testReq = {
-    method: 'GET',
-    url: '/',
-    headers: { host: `${HOST}:${PORT}` },
-    socket: { remoteAddress: '127.0.0.1' }
-  };
-  const testRes = {
-    writeHead: (status: number, headers: any) => {
-      console.log(`Local healthcheck test response status: ${status}`);
-      console.log('Response headers:', headers);
-    },
-    end: (data: string) => {
-      console.log('Local healthcheck test response data:', data);
-    }
-  };
-  server.emit('request', testReq, testRes);
-}); 
+// Wait for Redis to be ready before starting the server
+const startServer = async () => {
+  try {
+    await redis.ping();
+    console.log('Redis is responding to ping');
+    
+    server.listen(PORT, HOST, () => {
+      console.log(`WebSocket server is running on ${HOST}:${PORT}`);
+      console.log('Environment:', process.env.NODE_ENV || 'development');
+      console.log('WS_HOST:', process.env.WS_HOST);
+      console.log('WS_PORT:', process.env.WS_PORT);
+      console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
+      console.log('Server is ready to accept connections');
+      
+      // Test the healthcheck endpoint locally
+      const testReq = {
+        method: 'GET',
+        url: '/',
+        headers: { host: `${HOST}:${PORT}` },
+        socket: { remoteAddress: '127.0.0.1' }
+      };
+      const testRes = {
+        writeHead: (status: number, headers: any) => {
+          console.log(`Local healthcheck test response status: ${status}`);
+          console.log('Response headers:', headers);
+        },
+        end: (data: string) => {
+          console.log('Local healthcheck test response data:', data);
+        }
+      };
+      server.emit('request', testReq, testRes);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer(); 
