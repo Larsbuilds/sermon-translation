@@ -79,6 +79,16 @@ wss.on('connection', (ws: WS, req) => {
 });
 
 const server = createServer();
+
+// Add healthcheck endpoint
+server.on('request', (req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'healthy' }));
+    return;
+  }
+});
+
 server.on('upgrade', (request, socket, head) => {
   console.log('Received upgrade request');
   wss.handleUpgrade(request, socket, head, (ws) => {
