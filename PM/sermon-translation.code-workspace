@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../VJ Website"
+		},
+		{
+			"path": "../../peaks.js"
+		},
+		{
+			"path": "../../audio-orchestration"
+		}
+	],
+	"settings": {}
+}

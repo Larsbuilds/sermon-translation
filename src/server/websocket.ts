@@ -17,7 +17,7 @@ if (existsSync(envPath)) {
 } else {
   console.log('No .env.ws file found, using default environment variables');
   // Set default values for required environment variables
-  process.env.WS_PORT = process.env.WS_PORT || '3001';
+  process.env.WS_PORT = process.env.WS_PORT || '3002';
   process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
 }
 
@@ -45,221 +45,272 @@ redis.on('ready', () => {
 
 const wss = new WebSocketServer({ noServer: true });
 
+// Extend WebSocket type
+interface ExtendedWebSocket extends WS {
+  sessionId?: string;
+  deviceId?: string;
+  isMain?: boolean;
+}
+
 // Store active connections
-const connections = new Map<string, Set<WS>>();
+const connections = new Map<string, Map<string, ExtendedWebSocket>>();
 
 // Redis key prefixes
 const SESSION_PREFIX = 'ws:session:';
 const CONNECTION_PREFIX = 'ws:connection:';
 
-wss.on('connection', async (ws: WS, req) => {
+interface WebRTCMessage {
+  type: 'offer' | 'answer' | 'ice-candidate';
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+}
+
+wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   const url = new URL(req.url || '', `http://${req.headers.host}`);
   const sessionId = url.searchParams.get('sessionId');
+  const deviceId = url.searchParams.get('deviceId');
+  const isMain = url.searchParams.get('isMain') === 'true';
   const clientIp = req.socket.remoteAddress;
 
-  console.log(`New connection attempt from ${clientIp}`);
-  console.log(`Request URL: ${req.url}`);
+  console.log('New WebSocket connection:', {
+    sessionId,
+    deviceId,
+    isMain,
+    clientIp,
+    path: url.pathname
+  });
 
-  if (!sessionId) {
-    console.log('Connection rejected: No session ID provided');
-    ws.close(1008, 'Session ID is required');
+  if (!sessionId || !deviceId) {
+    console.error('Missing required parameters:', { sessionId, deviceId });
+    ws.close(4000, 'Missing required parameters');
     return;
   }
 
-  try {
-    // Store session in Redis
-    await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
-      createdAt: new Date().toISOString(),
-      lastActive: new Date().toISOString(),
-      clientIp
-    }));
+  // Add connection to session
+  if (!connections.has(sessionId)) {
+    connections.set(sessionId, new Map());
+  }
+  connections.get(sessionId)?.set(deviceId, ws);
 
-    // Add to connections
-    if (!connections.has(sessionId)) {
-      connections.set(sessionId, new Set());
-      console.log(`Created new session: ${sessionId}`);
-    }
-    connections.get(sessionId)!.add(ws);
+  // Store session info
+  ws.sessionId = sessionId;
+  ws.deviceId = deviceId;
+  ws.isMain = isMain;
 
-    // Store connection info in Redis
-    const connectionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    await redis.set(`${CONNECTION_PREFIX}${connectionId}`, JSON.stringify({
-      sessionId,
-      clientIp,
-      connectedAt: new Date().toISOString()
-    }));
-
-    console.log(`Client connected to session ${sessionId}`);
-    console.log(`Active sessions: ${connections.size}`);
-    console.log(`Active connections in session ${sessionId}: ${connections.get(sessionId)!.size}`);
-
-    ws.on('message', async (data: Buffer) => {
+  // Handle messages
+  ws.on('message', async (data: Buffer) => {
+    try {
+      const parsedData = JSON.parse(data.toString());
+      console.log(`Received message in session ${sessionId} from device ${deviceId}:`, {
+        type: parsedData.type,
+        dataSize: data.length
+      });
+      
+      // Update last active timestamp in Redis
       try {
-        const parsedData = JSON.parse(data.toString());
-        console.log(`Received message in session ${sessionId}:`, {
-          type: parsedData.type,
-          dataSize: data.length
-        });
-        
-        // Update last active timestamp in Redis
         await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
           createdAt: new Date().toISOString(),
           lastActive: new Date().toISOString(),
           clientIp
         }));
-        
-        // Broadcast to all other clients in the same session
-        const sessionConnections = connections.get(sessionId);
-        if (sessionConnections) {
-          sessionConnections.forEach((client) => {
-            if (client !== ws && client.readyState === WS.OPEN) {
-              client.send(JSON.stringify(parsedData));
-              console.log(`Broadcasted message to client in session ${sessionId}`);
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error handling message:', error);
+      } catch (redisError) {
+        console.error('Error updating Redis:', redisError);
+        // Continue processing the message even if Redis update fails
       }
-    });
-
-    ws.on('close', async () => {
-      // Remove from connections
+      
+      // Handle WebRTC signaling messages
       const sessionConnections = connections.get(sessionId);
       if (sessionConnections) {
-        sessionConnections.delete(ws);
-        if (sessionConnections.size === 0) {
-          connections.delete(sessionId);
-          console.log(`Session ${sessionId} closed - no more connections`);
+        switch (parsedData.type) {
+          case 'offer':
+          case 'answer':
+            // Broadcast to all other clients in the same session
+            sessionConnections.forEach((client) => {
+              if (client !== ws && client.readyState === WS.OPEN) {
+                try {
+                  client.send(JSON.stringify({
+                    type: parsedData.type,
+                    [parsedData.type]: parsedData[parsedData.type],
+                    from: deviceId
+                  }));
+                  console.log(`Broadcasted ${parsedData.type} to device ${client.deviceId} in session ${sessionId}`);
+                } catch (sendError) {
+                  console.error('Error sending message to client:', sendError);
+                }
+              }
+            });
+            break;
+          case 'ice-candidate': {
+            const parsedData = JSON.parse(data.toString()) as WebRTCMessage;
+            console.log(`Received message in session ${ws.sessionId} from device ${ws.deviceId}:`, { type: 'ice-candidate', dataSize: parsedData.candidate ? JSON.stringify(parsedData.candidate).length : 0 });
+            // Ensure required fields are present
+            const candidate = {
+              ...parsedData.candidate,
+              sdpMid: parsedData.candidate?.sdpMid || '0',
+              sdpMLineIndex: parsedData.candidate?.sdpMLineIndex || 0
+            };
+            // Broadcast to other clients in the same session
+            const currentDeviceId = (ws as ExtendedWebSocket).deviceId;
+            if (currentDeviceId) {
+              Array.from(sessionConnections.entries()).forEach(([clientId, client]) => {
+                if (clientId !== currentDeviceId) {
+                  try {
+                    client.send(JSON.stringify({
+                      type: 'ice-candidate',
+                      candidate,
+                      from: currentDeviceId
+                    }));
+                    console.log(`Broadcasted ice-candidate to device ${clientId} in session ${ws.sessionId}`);
+                  } catch (sendError) {
+                    console.error('Error sending ICE candidate to client:', sendError);
+                  }
+                }
+              });
+            }
+            break;
+          }
+          default:
+            console.error('Unknown message type:', parsedData.type);
         }
       }
-      console.log(`Client disconnected from session ${sessionId}`);
-      console.log(`Remaining active sessions: ${connections.size}`);
-    });
+    } catch (error) {
+      console.error('Error handling message:', error);
+    }
+  });
 
-    ws.on('error', (error) => {
-      console.error(`WebSocket error in session ${sessionId}:`, error);
-    });
-  } catch (error) {
-    console.error('Error handling connection:', error);
-    ws.close(1011, 'Internal server error');
-  }
+  // Handle connection close
+  ws.on('close', () => {
+    console.log(`Connection closed for device ${deviceId} in session ${sessionId}`);
+    const sessionConnections = connections.get(sessionId);
+    if (sessionConnections) {
+      sessionConnections.delete(deviceId);
+      if (sessionConnections.size === 0) {
+        connections.delete(sessionId);
+      }
+    }
+  });
 });
 
-const PORT = parseInt(process.env.WS_PORT || '3001', 10);
+const PORT = parseInt(process.env.WS_PORT || '3002', 10);
 const HOST = process.env.WS_HOST || '0.0.0.0';
 
 const server = createServer();
 
-// Add healthcheck endpoint and handle all HTTP requests
-server.on('request', (req, res) => {
-  const clientIp = req.socket.remoteAddress;
-  console.log(`Received HTTP request: ${req.method} ${req.url} from ${clientIp}`);
+// Handle WebSocket upgrade requests
+server.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url || '', `http://${request.headers.host}`);
+  console.log('Received WebSocket upgrade request for path:', url.pathname);
   
-  // Add CORS headers to all responses
+  try {
+    if (url.pathname === '/webrtc' || url.pathname === '/ws') {
+      console.log('Handling WebSocket connection for path:', url.pathname);
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      console.log('Rejecting WebSocket connection for unknown path:', url.pathname);
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+      socket.destroy();
+    }
+  } catch (error) {
+    console.error('Error handling WebSocket upgrade:', error);
+    socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+    socket.destroy();
+  }
+});
+
+// Handle HTTP requests
+server.on('request', (req, res) => {
+  const url = new URL(req.url || '', `http://${req.headers.host}`);
+  
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  // Handle OPTIONS requests for CORS
+  
   if (req.method === 'OPTIONS') {
-    res.writeHead(204);
+    res.writeHead(200);
     res.end();
     return;
   }
-
-  if (req.url === '/') {
-    console.log(`Root endpoint request received from ${clientIp}`);
+  
+  if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
+    res.end(JSON.stringify({
       message: 'WebSocket server is running',
       endpoints: {
         health: '/health',
-        websocket: '/ws'
+        websocket: '/webrtc'
       }
     }));
     return;
   }
-
-  if (req.url === '/health') {
-    console.log(`Healthcheck request received from ${clientIp}`);
-    try {
-      const healthStatus = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        connections: connections.size,
-        host: HOST,
-        port: PORT,
-        clientIp: clientIp,
-        redis: redis.status === 'ready' ? 'connected' : 'disconnected'
-      };
-      
-      res.writeHead(200, { 
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache'
-      });
-      res.end(JSON.stringify(healthStatus));
-      console.log('Healthcheck response sent successfully:', healthStatus);
-    } catch (error) {
-      console.error('Error sending healthcheck response:', error);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ 
-        error: 'Internal Server Error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }));
-    }
+  
+  if (url.pathname === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      message: 'WebSocket server is running',
+      endpoints: {
+        health: '/health',
+        websocket: '/webrtc'
+      }
+    }));
     return;
   }
-
-  // Handle 404 for all other routes
-  console.log(`404 Not Found: ${req.url} from ${clientIp}`);
+  
   res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ 
-    error: 'Not Found',
-    path: req.url
-  }));
-});
-
-// Handle server errors
-server.on('error', (error: NodeJS.ErrnoException) => {
-  console.error('Server error:', error);
-  // Attempt to restart the server if it fails
-  if (error.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} is already in use, trying to close existing connections...`);
-    server.close(() => {
-      console.log('Server closed, attempting to restart...');
-      server.listen(PORT, HOST, () => {
-        console.log(`Server restarted successfully on ${HOST}:${PORT}`);
-      });
-    });
-  }
-});
-
-server.on('upgrade', (request, socket, head) => {
-  console.log('Received upgrade request');
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit('connection', ws, request);
-  });
+  res.end(JSON.stringify({ error: 'Not found' }));
 });
 
 // Handle graceful shutdown
-const shutdown = () => {
+const shutdown = async () => {
   console.log('Received shutdown signal, closing server...');
   
   // Close all WebSocket connections
-  connections.forEach((sessionConnections, sessionId) => {
-    console.log(`Closing session ${sessionId}`);
-    sessionConnections.forEach((ws) => {
-      if (ws.readyState === WS.OPEN) {
-        ws.close(1000, 'Server shutting down');
+  const sessionIds = Array.from(connections.keys());
+  for (const sessionId of sessionIds) {
+    const sessionConnections = connections.get(sessionId);
+    if (sessionConnections) {
+      console.log(`Closing session ${sessionId}`);
+      const connections = Array.from(sessionConnections.values());
+      for (const ws of connections) {
+        if (ws.readyState === WS.OPEN) {
+          ws.close(1000, 'Server shutting down');
+        }
       }
-    });
-  });
+      // Clean up Redis session data
+      try {
+        await redis.del(`${SESSION_PREFIX}${sessionId}`);
+        console.log(`Cleaned up Redis data for session ${sessionId}`);
+      } catch (error) {
+        console.error(`Error cleaning up Redis data for session ${sessionId}:`, error);
+      }
+    }
+  }
+  
+  // Clean up Redis connection data
+  try {
+    const keys = await redis.keys(`${CONNECTION_PREFIX}*`);
+    if (keys.length > 0) {
+      await redis.del(keys);
+      console.log(`Cleaned up ${keys.length} connection records from Redis`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up Redis connection data:', error);
+  }
+  
+  // Close Redis connection
+  try {
+    await redis.quit();
+    console.log('Redis connection closed');
+  } catch (error) {
+    console.error('Error closing Redis connection:', error);
+  }
   
   // Close the HTTP server
   server.close(() => {
-    console.log('Server closed');
+    console.log('HTTP server closed');
     process.exit(0);
   });
 };
@@ -268,6 +319,14 @@ const shutdown = () => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 process.on('SIGUSR2', shutdown);
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  shutdown();
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  shutdown();
+});
 
 // Wait for Redis to be ready before starting the server
 const startServer = async () => {
@@ -294,6 +353,9 @@ const startServer = async () => {
         writeHead: (status: number, headers: any) => {
           console.log(`Local healthcheck test response status: ${status}`);
           console.log('Response headers:', headers);
+        },
+        setHeader: (name: string, value: string) => {
+          console.log(`Setting header ${name}: ${value}`);
         },
         end: (data: string) => {
           console.log('Local healthcheck test response data:', data);
