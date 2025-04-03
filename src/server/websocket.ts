@@ -200,12 +200,17 @@ const server = createServer();
 // Handle WebSocket upgrade requests
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url || '', `http://${request.headers.host}`);
-  console.log('Received WebSocket upgrade request for path:', url.pathname);
+  console.log('Received WebSocket upgrade request:', {
+    path: url.pathname,
+    query: Object.fromEntries(url.searchParams),
+    headers: request.headers
+  });
   
   try {
     if (url.pathname === '/webrtc' || url.pathname === '/ws') {
       console.log('Handling WebSocket connection for path:', url.pathname);
       wss.handleUpgrade(request, socket, head, (ws) => {
+        console.log('WebSocket upgrade successful, emitting connection');
         wss.emit('connection', ws, request);
       });
     } else {
@@ -223,6 +228,11 @@ server.on('upgrade', (request, socket, head) => {
 // Handle HTTP requests
 server.on('request', (req, res) => {
   const url = new URL(req.url || '', `http://${req.headers.host}`);
+  console.log('Received HTTP request:', {
+    method: req.method,
+    path: url.pathname,
+    headers: req.headers
+  });
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -238,11 +248,17 @@ server.on('request', (req, res) => {
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
+      status: 'ok',
       message: 'WebSocket server is running',
       endpoints: {
         health: '/health',
         websocket: '/webrtc'
-      }
+      },
+      connections: Array.from(connections.entries()).map(([sessionId, devices]) => ({
+        sessionId,
+        deviceCount: devices.size,
+        devices: Array.from(devices.keys())
+      }))
     }));
     return;
   }
@@ -250,6 +266,7 @@ server.on('request', (req, res) => {
   if (url.pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
+      status: 'ok',
       message: 'WebSocket server is running',
       endpoints: {
         health: '/health',
@@ -328,7 +345,7 @@ process.on('unhandledRejection', (reason, promise) => {
   shutdown();
 });
 
-// Wait for Redis to be ready before starting the server
+// Start the server
 const startServer = async () => {
   try {
     await redis.ping();
@@ -339,29 +356,8 @@ const startServer = async () => {
       console.log('Environment:', process.env.NODE_ENV || 'development');
       console.log('WS_HOST:', process.env.WS_HOST);
       console.log('WS_PORT:', process.env.WS_PORT);
-      console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/');
+      console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/health');
       console.log('Server is ready to accept connections');
-      
-      // Test the healthcheck endpoint locally
-      const testReq = {
-        method: 'GET',
-        url: '/',
-        headers: { host: `${HOST}:${PORT}` },
-        socket: { remoteAddress: '127.0.0.1' }
-      };
-      const testRes = {
-        writeHead: (status: number, headers: any) => {
-          console.log(`Local healthcheck test response status: ${status}`);
-          console.log('Response headers:', headers);
-        },
-        setHeader: (name: string, value: string) => {
-          console.log(`Setting header ${name}: ${value}`);
-        },
-        end: (data: string) => {
-          console.log('Local healthcheck test response data:', data);
-        }
-      };
-      server.emit('request', testReq, testRes);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

@@ -27,6 +27,12 @@ export class WebRTCSignaling extends EventEmitter {
 
   public connect(): void {
     try {
+      if (this.ws) {
+        console.log('Closing existing WebSocket connection');
+        this.ws.close();
+        this.ws = null;
+      }
+
       const wsUrl = `${this.config.url}/webrtc?sessionId=${this.config.sessionId}&deviceId=${this.config.deviceId}&isMain=${this.config.isMain}`;
       console.log('Connecting to WebSocket server:', wsUrl);
       this.ws = new WebSocket(wsUrl);
@@ -36,10 +42,15 @@ export class WebRTCSignaling extends EventEmitter {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.emit('connected');
+        this.sendPendingIceCandidates();
       };
 
-      this.ws.onclose = () => {
-        console.log('Signaling server disconnected');
+      this.ws.onclose = (event) => {
+        console.log('Signaling server disconnected:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
+        });
         this.isConnected = false;
         this.handleReconnect();
         this.emit('disconnected');
@@ -53,7 +64,11 @@ export class WebRTCSignaling extends EventEmitter {
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('Received signaling message:', data);
+          console.log('Received signaling message:', {
+            type: data.type,
+            from: data.from,
+            dataSize: event.data.length
+          });
           this.handleMessage(data);
         } catch (error) {
           console.error('Error parsing signaling message:', error);
@@ -70,7 +85,11 @@ export class WebRTCSignaling extends EventEmitter {
       this.reconnectAttempts++;
       const timeout = this.config.reconnectTimeout! * Math.pow(2, this.reconnectAttempts - 1);
       console.log(`Attempting to reconnect in ${timeout}ms (attempt ${this.reconnectAttempts}/${this.config.reconnectAttempts})`);
-      setTimeout(() => this.connect(), timeout);
+      setTimeout(() => {
+        if (!this.isConnected) {
+          this.connect();
+        }
+      }, timeout);
     } else {
       console.error('Max reconnection attempts reached');
       this.emit('error', new Error('Failed to establish signaling connection after multiple attempts'));
