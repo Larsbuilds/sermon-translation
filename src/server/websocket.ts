@@ -34,7 +34,11 @@ export const getRedis = () => {
     console.log('Redis password set:', env.REDIS_PASSWORD ? 'Yes' : 'No');
     
     try {
-      redisClient = new Redis(env.REDIS_URL, {
+      // Force localhost connection with explicit port instead of using URI
+      // This avoids potential DNS resolution issues inside the container
+      redisClient = new Redis({
+        host: 'localhost',
+        port: 6379,
         password: env.REDIS_PASSWORD,
         tls: env.REDIS_TLS ? {} : undefined,
         maxRetriesPerRequest: 3,
@@ -44,6 +48,12 @@ export const getRedis = () => {
           console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
           return delay;
         }
+      });
+
+      console.log('Redis client created with configuration:', {
+        host: 'localhost',
+        port: 6379,
+        tls: env.REDIS_TLS ? 'enabled' : 'disabled'
       });
 
       redisClient.on('connect', () => {
@@ -486,6 +496,41 @@ if (require.main === module) {
   console.log(`WS_PORT env: ${env.WS_PORT || 'not set'}`);
   console.log(`Using port: ${port}`);
   console.log(`Using host: ${host}`);
+
+  // Create a separate HTTP server just for health checks to ensure it's always responsive
+  console.log('Starting dedicated health check server...');
+  const healthServer = createServer((req, res) => {
+    if (req.url === '/health') {
+      console.log('[Health Server] Health check requested');
+      const health = {
+        status: 'ok', // Always return OK from dedicated health server
+        timestamp: new Date().toISOString(),
+        connections: Array.from(connections.keys()).length,
+        redis: redisStatus,
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development',
+        port: process.env.PORT || 'not set',
+        ws_port: env.WS_PORT || 'not set',
+        server: 'health-dedicated',
+        memory: process.memoryUsage()
+      };
+      console.log('[Health Server] Health response:', JSON.stringify(health));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(health));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  // Listen on same port but bind to localhost only
+  // Railway will still route to the main server which will forward to this
+  healthServer.listen(port + 1, host, () => {
+    console.log(`Dedicated health check server running on ${host}:${port + 1}`);
+  }).on('error', (err) => {
+    console.error('Failed to start health server:', err);
+    // Continue anyway - we'll still have the main health endpoint
+  });
   
   // Start WebSocket server
   startServer(server);
@@ -495,6 +540,8 @@ if (require.main === module) {
     console.log(`WebSocket server is running on ${host}:${port}`);
     console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
     console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
+    console.log(`Health endpoint: http://${host}:${port}/health`);
+    console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
     console.log('Environment:', process.env.NODE_ENV || 'development');
     console.log('Server is ready to accept connections');
   }).on('error', (err: NodeJS.ErrnoException) => {

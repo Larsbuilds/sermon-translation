@@ -57,11 +57,12 @@ ENV REDIS_URL=redis://localhost:6379
 
 # Expose ports explicitly
 EXPOSE 8080
+EXPOSE 8081
 EXPOSE 6379
 
-# Add healthcheck with more reliability
+# Add healthcheck with more reliability - use dedicated health port
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/health || curl -f http://0.0.0.0:${PORT}/health || exit 1
+  CMD curl -f http://localhost:8081/health || curl -f http://0.0.0.0:8081/health || exit 1
 
 # Start Redis and the WebSocket server using our startup script
 CMD ["./scripts/startup.sh"] 

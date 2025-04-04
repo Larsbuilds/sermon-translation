@@ -12,12 +12,15 @@ echo "REDIS_URL: $REDIS_URL"
 export PORT=${PORT:-8080}
 echo "Using PORT: $PORT"
 
+# Create log directory
+mkdir -p /app/logs
+
 echo "===== STARTING REDIS SERVER ====="
 echo "Redis conf:"
 cat /etc/redis/redis.conf | grep -v "^#" | grep -v "^$"
 
 echo "Starting Redis server with debug logging..."
-redis-server --daemonize yes --loglevel debug --port 6379
+redis-server --daemonize yes --loglevel debug --port 6379 --logfile /app/logs/redis.log
 
 echo "Waiting for Redis to start (5 seconds)..."
 sleep 5
@@ -38,15 +41,19 @@ redis-cli -h localhost -p 6379 set test_key "test_value" || echo "Failed to set 
 redis-cli -h localhost -p 6379 get test_key || echo "Failed to get test key from Redis!"
 
 echo "Checking Redis logs..."
-journalctl -u redis-server -n 50 --no-pager || echo "No systemd Redis logs found"
-cat /var/log/redis/redis-server.log 2>/dev/null || echo "No Redis log file found"
+if [ -f "/app/logs/redis.log" ]; then
+    echo "Redis log file content:"
+    cat /app/logs/redis.log
+else
+    echo "No Redis log file found at /app/logs/redis.log"
+fi
 
 echo "===== STARTING WEBSOCKET SERVER ====="
 echo "Verifying REDIS_URL environment variable:"
 echo "REDIS_URL: $REDIS_URL"
 
 echo "Starting WebSocket server with debug logging..."
-NODE_DEBUG=*,redis,net,http node --experimental-specifier-resolution=node dist/server/websocket.js &
+NODE_DEBUG=*,redis,net,http node --experimental-specifier-resolution=node dist/server/websocket.js > /app/logs/websocket.log 2>&1 &
 SERVER_PID=$!
 
 echo "Waiting for WebSocket server to initialize (30 seconds)..."
@@ -58,6 +65,8 @@ if ps -p $SERVER_PID > /dev/null; then
     echo "WebSocket server is running with PID: $SERVER_PID"
 else
     echo "ERROR: WebSocket server failed to start. Check logs."
+    echo "Last 50 lines of websocket log:"
+    tail -50 /app/logs/websocket.log
     exit 1
 fi
 
@@ -88,6 +97,9 @@ netstat -tuln || echo "No listening ports found!"
 
 echo "Checking open files for server process..."
 lsof -p $SERVER_PID || echo "No open files for server process!"
+
+echo "Checking last 50 lines of websocket log:"
+tail -50 /app/logs/websocket.log
 
 echo "===== STARTUP COMPLETE ====="
 echo "Keeping container running by waiting for server process..."
