@@ -102,7 +102,7 @@ describe('WebRTCSignaling', () => {
     jest.useFakeTimers();
     
     signaling = new WebRTCSignaling({
-      url: 'ws://localhost:3002',
+      url: 'ws://localhost:8080',
       sessionId: 'test-session',
       deviceId: 'test-device',
       isMain: true,

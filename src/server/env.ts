@@ -7,7 +7,7 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   
   // WebSocket Server
-  WS_PORT: z.string().transform(Number).default('3002'),
+  WS_PORT: z.string().transform(Number).default('8080'),
   WS_HOST: z.string().default('0.0.0.0'),
 
   // Redis

@@ -280,7 +280,7 @@ export const startServer = (server?: HttpServer) => {
   httpServer = server || createServer();
   
   const host = env.WS_HOST || '0.0.0.0'; // Default to 0.0.0.0 for container deployments
-  const port = env.WS_PORT ? parseInt(env.WS_PORT, 10) : 3002;
+  const port = env.WS_PORT || 8080; // WS_PORT is now a number, no need to parse
 
   // Start cleanup interval
   startCleanupInterval();
@@ -437,10 +437,13 @@ if (require.main === module) {
   startServer(server);
   startCleanupInterval();
   
-  server.listen({ port: process.env.PORT || 3002, host: process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost' }, () => {
-    console.log(`WebSocket server is running on ${process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'}:${process.env.PORT || 3002}`);
-    console.log(`WebRTC endpoint: ws://${process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'}:${process.env.PORT || 3002}/webrtc`);
-    console.log(`WebSocket endpoint: ws://${process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'}:${process.env.PORT || 3002}/ws`);
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
+  
+  server.listen({ port, host }, () => {
+    console.log(`WebSocket server is running on ${host}:${port}`);
+    console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+    console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
     console.log('Environment:', process.env.NODE_ENV || 'development');
     console.log('Server is ready to accept connections');
   });
