@@ -10,6 +10,8 @@ const schema = z.object({
     .default(() => parseInt(process.env.PORT || '8080')),
   MONGODB_URI: z.string().min(1).default('mongodb://localhost:27017'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  // Optional public URL for this WebSocket server
+  WS_URL: z.string().optional(),
   REDIS_PASSWORD: z.string().optional(),
   REDIS_TLS: z.enum(['true', 'false']).default('false').transform((val) => val === 'true'),
   MAX_CONNECTIONS_PER_SESSION: z.coerce.number().default(5),
@@ -24,13 +26,30 @@ function validateEnv(): Env {
   try {
     const env = schema.parse(process.env);
 
+    // Log environment details in development mode
+    if (env.NODE_ENV !== 'production') {
+      console.log('Environment configuration:', {
+        NODE_ENV: env.NODE_ENV,
+        WS_HOST: env.WS_HOST,
+        WS_PORT: env.WS_PORT,
+        WS_URL: env.WS_URL,
+        REDIS_URL: env.REDIS_URL,
+        REDIS_TLS: env.REDIS_TLS,
+      });
+    }
+
     // Additional validation for production
     if (env.NODE_ENV === 'production') {
-      if (!env.REDIS_PASSWORD) {
-        throw new Error('REDIS_PASSWORD is required in production');
+      // Check if we're in a Railway deployment with internal hostnames
+      const isRailwayInternal = env.REDIS_URL.includes('.railway.internal');
+      
+      // Only require password if not using Railway internal network
+      if (!env.REDIS_PASSWORD && !isRailwayInternal) {
+        console.warn('⚠️ REDIS_PASSWORD is not set in production but may be required if not using Railway internal network');
       }
-      if (!env.REDIS_TLS) {
-        console.warn('⚠️ REDIS_TLS should be enabled in production');
+      
+      if (!env.REDIS_TLS && !isRailwayInternal) {
+        console.warn('⚠️ REDIS_TLS should be enabled in production when not using Railway internal network');
       }
     }
 

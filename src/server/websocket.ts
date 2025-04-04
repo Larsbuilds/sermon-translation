@@ -34,25 +34,46 @@ export const getRedis = () => {
     console.log('Redis password set:', env.REDIS_PASSWORD ? 'Yes' : 'No');
     
     try {
-      // Force localhost connection with explicit port instead of using URI
-      // This avoids potential DNS resolution issues inside the container
-      redisClient = new Redis({
-        host: 'localhost',
-        port: 6379,
-        password: env.REDIS_PASSWORD,
-        tls: env.REDIS_TLS ? {} : undefined,
-        maxRetriesPerRequest: 3,
-        connectTimeout: 10000,
-        retryStrategy(times: number) {
-          const delay = Math.min(times * 100, 3000);
-          console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
-          return delay;
-        }
-      });
+      // Check if we're using the Railway internal network
+      const isRailwayInternal = env.REDIS_URL.includes('.railway.internal');
+      
+      if (isRailwayInternal) {
+        console.log('Using Railway internal networking for Redis connection');
+        // When using Railway internal DNS, use the URL directly
+        redisClient = new Redis(env.REDIS_URL, {
+          maxRetriesPerRequest: 3,
+          connectTimeout: 10000,
+          retryStrategy(times: number) {
+            const delay = Math.min(times * 100, 3000);
+            console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
+            return delay;
+          }
+        });
+      } else {
+        // For local development or when using explicit host/port
+        console.log('Using direct Redis connection (localhost or custom)');
+        // Parse Redis URL to get host and port
+        const redisUrl = new URL(env.REDIS_URL);
+        
+        // Force localhost connection with explicit port instead of using URI
+        // This avoids potential DNS resolution issues inside the container
+        redisClient = new Redis({
+          host: redisUrl.hostname,
+          port: parseInt(redisUrl.port || '6379'),
+          password: env.REDIS_PASSWORD,
+          tls: env.REDIS_TLS ? {} : undefined,
+          maxRetriesPerRequest: 3,
+          connectTimeout: 10000,
+          retryStrategy(times: number) {
+            const delay = Math.min(times * 100, 3000);
+            console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
+            return delay;
+          }
+        });
+      }
 
       console.log('Redis client created with configuration:', {
-        host: 'localhost',
-        port: 6379,
+        url: env.REDIS_URL,
         tls: env.REDIS_TLS ? 'enabled' : 'disabled'
       });
 

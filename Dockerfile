@@ -54,6 +54,7 @@ ENV NODE_ENV=production
 # Use Railway's PORT environment variable or fallback to 8080
 ENV PORT=8080
 ENV WS_HOST=0.0.0.0
+# Default Redis URL for local development - will be overridden by Railway in production
 ENV REDIS_URL=redis://localhost:6379
 
 # Expose ports explicitly

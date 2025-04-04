@@ -20,8 +20,11 @@ restartPolicyMaxRetries = 10
 [deploy.env]
 NODE_ENV = "production"
 NODE_OPTIONS = "--experimental-specifier-resolution=node"
-REDIS_URL = "redis://localhost:6379"
+# Use Railway's internal DNS for Redis when deployed (internal URL)
+REDIS_URL = "redis://outstanding-smile.railway.internal:6379"
 WS_HOST = "0.0.0.0"
+# Provide a WS_URL for other services to connect to this WebSocket server
+WS_URL = "wss://outstanding-smile.railway.internal:8080"
 MONGODB_URI = "${MONGODB_URI}"
 
 # Explicitly define exposed ports
