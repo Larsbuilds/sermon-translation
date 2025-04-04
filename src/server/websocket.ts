@@ -28,43 +28,68 @@ let redisStatus = 'not_initialized';
 
 export const getRedis = () => {
   if (!redisClient) {
+    console.log('===== REDIS CONNECTION DETAILS =====');
     console.log('Initializing Redis connection to:', env.REDIS_URL);
-    redisClient = new Redis(env.REDIS_URL, {
-      password: env.REDIS_PASSWORD,
-      tls: env.REDIS_TLS ? {} : undefined,
-      maxRetriesPerRequest: 3,
-      connectTimeout: 10000,
-      retryStrategy(times: number) {
-        const delay = Math.min(times * 100, 3000);
-        console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
-        return delay;
-      }
-    });
+    console.log('Redis TLS enabled:', env.REDIS_TLS);
+    console.log('Redis password set:', env.REDIS_PASSWORD ? 'Yes' : 'No');
+    
+    try {
+      redisClient = new Redis(env.REDIS_URL, {
+        password: env.REDIS_PASSWORD,
+        tls: env.REDIS_TLS ? {} : undefined,
+        maxRetriesPerRequest: 3,
+        connectTimeout: 10000,
+        retryStrategy(times: number) {
+          const delay = Math.min(times * 100, 3000);
+          console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
+          return delay;
+        }
+      });
 
-    redisClient.on('connect', () => {
-      console.log('Connected to Redis');
-      redisStatus = 'connected';
-    });
+      redisClient.on('connect', () => {
+        console.log('===== REDIS CONNECTED =====');
+        redisStatus = 'connected';
+      });
 
-    redisClient.on('error', (error) => {
-      console.error('Redis error:', error);
-      redisStatus = 'error';
-    });
+      redisClient.on('error', (error) => {
+        console.error('===== REDIS ERROR =====');
+        console.error('Error details:', error);
+        console.error('Redis URL:', env.REDIS_URL);
+        console.error('Redis status was:', redisStatus);
+        redisStatus = 'error';
+      });
 
-    redisClient.on('ready', () => {
-      console.log('Redis is ready');
-      redisStatus = 'ready';
-    });
+      redisClient.on('ready', () => {
+        console.log('===== REDIS READY =====');
+        redisStatus = 'ready';
+        
+        // Test Redis functionality
+        if (redisClient) {
+          redisClient.set('health_test', 'ok', 'EX', 60)
+            .then(() => console.log('Successfully set test key in Redis'))
+            .catch(err => console.error('Failed to set test key in Redis:', err));
+            
+          redisClient.get('health_test')
+            .then(val => console.log('Test key value:', val))
+            .catch(err => console.error('Failed to get test key from Redis:', err));
+        }
+      });
 
-    redisClient.on('close', () => {
-      console.log('Redis connection closed');
-      redisStatus = 'closed';
-    });
+      redisClient.on('close', () => {
+        console.log('===== REDIS CONNECTION CLOSED =====');
+        redisStatus = 'closed';
+      });
 
-    redisClient.on('reconnecting', () => {
-      console.log('Redis reconnecting');
-      redisStatus = 'reconnecting';
-    });
+      redisClient.on('reconnecting', () => {
+        console.log('===== REDIS RECONNECTING =====');
+        redisStatus = 'reconnecting';
+      });
+    } catch (error) {
+      console.error('===== REDIS INITIALIZATION FAILED =====');
+      console.error('Error details:', error);
+      console.error('Redis URL:', env.REDIS_URL);
+      redisStatus = 'initialization_failed';
+    }
   }
   return redisClient;
 };
@@ -204,8 +229,11 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
 
   // Store session in Redis
   await safeRedisOp(async () => {
-    await redis.sadd('sessions', sessionId);
-    await redis.set(`ws:session:${sessionId}`, JSON.stringify({
+    const client = getRedis();
+    if (!client) return false;
+    
+    await client.sadd('sessions', sessionId);
+    await client.set(`ws:session:${sessionId}`, JSON.stringify({
       createdAt: new Date().toISOString(),
       lastActive: new Date().toISOString(),
       clientIp,
@@ -229,7 +257,10 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
 
       // Update session TTL in Redis
       await safeRedisOp(async () => {
-        await redis.expire(`ws:session:${sessionId}`, env.SESSION_TTL);
+        const client = getRedis();
+        if (!client) return false;
+        
+        await client.expire(`ws:session:${sessionId}`, env.SESSION_TTL);
         return true;
       }, false);
 
@@ -267,8 +298,11 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
         connections.delete(sessionId);
         // Remove session from Redis if no connections remain
         await safeRedisOp(async () => {
-          await redis.del(`ws:session:${sessionId}`);
-          await redis.srem('sessions', sessionId);
+          const client = getRedis();
+          if (!client) return false;
+          
+          await client.del(`ws:session:${sessionId}`);
+          await client.srem('sessions', sessionId);
           return true;
         }, false);
       }

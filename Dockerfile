@@ -2,14 +2,31 @@
 FROM node:20-slim
 
 # Install Redis, curl for healthcheck, and other utilities
-RUN apt-get update && apt-get install -y redis-server curl procps net-tools && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    redis-server \
+    curl \
+    procps \
+    net-tools \
+    lsof \
+    iproute2 \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
 
-# Configure Redis
+# Configure Redis for reliability
 RUN mkdir -p /var/run/redis && \
     chown redis:redis /var/run/redis && \
     chmod 750 /var/run/redis && \
-    echo "bind 0.0.0.0" >> /etc/redis/redis.conf && \
-    echo "protected-mode no" >> /etc/redis/redis.conf
+    sed -i 's/bind 127.0.0.1/bind 0.0.0.0/g' /etc/redis/redis.conf && \
+    echo "protected-mode no" >> /etc/redis/redis.conf && \
+    echo "maxmemory 128mb" >> /etc/redis/redis.conf && \
+    echo "maxmemory-policy allkeys-lru" >> /etc/redis/redis.conf && \
+    echo "appendonly yes" >> /etc/redis/redis.conf && \
+    echo "appendfsync everysec" >> /etc/redis/redis.conf && \
+    echo "timeout 0" >> /etc/redis/redis.conf && \
+    echo "tcp-keepalive 300" >> /etc/redis/redis.conf
+
+# Create data directory for Redis
+RUN mkdir -p /data && chown redis:redis /data
 
 # Set working directory
 WORKDIR /app
@@ -29,9 +46,13 @@ RUN chmod +x scripts/startup.sh
 # Build the application
 RUN npm run build:ws
 
+# Set to production mode
+ENV NODE_ENV=production
+
 # Use Railway's PORT environment variable or fallback to 8080
 ENV PORT=8080
 ENV WS_HOST=0.0.0.0
+ENV REDIS_URL=redis://localhost:6379
 
 # Expose PORT explicitly for clarity
 EXPOSE 8080
