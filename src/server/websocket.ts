@@ -520,24 +520,22 @@ if (require.main === module) {
   console.log(`Using port: ${port}`);
   console.log(`Using host: ${host}`);
 
-  // Create a separate HTTP server just for health checks - this should always run regardless of Redis state
+  // Create a separate simple HTTP server just for health checks
   console.log('Starting dedicated health check server...');
-  const healthServer = createServer((req, res) => {
-    if (req.url === '/health') {
-      console.log('[Health Server] Health check requested');
+  
+  // Use a very simple HTTP server for health checks that has no dependencies
+  const healthServer = require('http').createServer((req: IncomingMessage, res: ServerResponse) => {
+    console.log(`[Health Server] Request received: ${req.url}`);
+    
+    if (req.url === '/health' || req.url === '/') {
       const health = {
-        status: 'ok', // Always return OK from dedicated health server
+        status: 'ok',
         timestamp: new Date().toISOString(),
-        connections: Array.from(connections.keys()).length,
-        redis: redisStatus,
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        port: process.env.PORT || 'not set',
-        ws_port: env.WS_PORT || 'not set',
         server: 'health-dedicated',
-        memory: process.memoryUsage()
+        uptime: process.uptime()
       };
-      console.log('[Health Server] Health response:', JSON.stringify(health));
+      
+      console.log('[Health Server] Sending 200 OK response');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(health));
     } else {
@@ -546,18 +544,30 @@ if (require.main === module) {
     }
   });
 
-  // Start health server first to ensure Railway health checks can succeed
+  // Start health server immediately and bind to all interfaces (0.0.0.0)
   try {
-    console.log(`Starting health server on ${host}:${port + 1}...`);
-    healthServer.listen(port + 1, host, () => {
-      console.log(`Dedicated health check server running on ${host}:${port + 1}`);
-    }).on('error', (err) => {
+    const healthPort = port + 1;
+    console.log(`Starting health server on 0.0.0.0:${healthPort}...`);
+    
+    healthServer.listen(healthPort, '0.0.0.0', () => {
+      console.log(`Dedicated health check server running on 0.0.0.0:${healthPort}`);
+    });
+    
+    healthServer.on('error', (err: NodeJS.ErrnoException) => {
       console.error('Failed to start health server:', err);
-      // Continue anyway - we'll still have the main health endpoint
+      console.log('Starting a backup health server...');
+      
+      // Try one more time on a different port
+      try {
+        healthServer.listen(healthPort + 1, '0.0.0.0', () => {
+          console.log(`Backup health check server running on 0.0.0.0:${healthPort + 1}`);
+        });
+      } catch (backupErr) {
+        console.error('Failed to start backup health server:', backupErr);
+      }
     });
   } catch (err) {
     console.error('Error starting health server:', err);
-    // Continue execution - this should not prevent the main server from starting
   }
   
   // Test Redis connection before starting WebSocket server
