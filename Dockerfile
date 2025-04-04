@@ -30,11 +30,11 @@ RUN chmod +x scripts/startup.sh
 RUN npm run build:ws
 
 # Expose WebSocket port
-EXPOSE 3002
+EXPOSE 8080
 
 # Add healthcheck
 HEALTHCHECK --interval=10s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:3002/health || exit 1
+  CMD curl -f http://localhost:8080/health || exit 1
 
 # Start Redis and the WebSocket server using our startup script
 CMD ["./scripts/startup.sh"] 

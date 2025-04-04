@@ -33,10 +33,10 @@ else
 fi
 
 echo "Checking health endpoint..."
-curl -v http://localhost:3002/health || echo "Health endpoint not responding yet, but continuing..."
+curl -v http://localhost:8080/health || echo "Health endpoint not responding yet, but continuing..."
 
-echo "Checking if port 3002 is in use..."
-netstat -tuln | grep 3002 || echo "Port 3002 not found in netstat"
+echo "Checking if port 8080 is in use..."
+netstat -tuln | grep 8080 || echo "Port 8080 not found in netstat"
 
 echo "Startup complete, keeping container running"
 # Keep the container running by waiting for the server process
