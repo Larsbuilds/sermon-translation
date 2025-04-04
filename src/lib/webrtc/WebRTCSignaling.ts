@@ -47,11 +47,12 @@ export class WebRTCSignaling extends EventEmitter {
       });
 
       this.ws.addEventListener('close', (event) => {
-        console.log('Signaling server disconnected:', {
-          code: event instanceof CloseEvent ? event.code : 1006,
-          reason: event instanceof CloseEvent ? event.reason : 'Connection closed',
-          wasClean: event instanceof CloseEvent ? event.wasClean : false
-        });
+        const closeInfo = {
+          code: event && 'code' in event ? event.code : 1006,
+          reason: event && 'reason' in event ? event.reason : 'Connection closed',
+          wasClean: event && 'wasClean' in event ? event.wasClean : false
+        };
+        console.log('Signaling server disconnected:', closeInfo);
         this.isConnected = false;
         this.emit('disconnected');
         this.handleReconnect();
