@@ -107,6 +107,19 @@ const connections = new Map<string, Map<string, ExtendedWebSocket>>();
 const SESSION_PREFIX = 'ws:session:';
 const CONNECTION_PREFIX = 'ws:connection:';
 
+// WebRTC Types for Node.js environment
+interface RTCSessionDescriptionInit {
+  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
+  sdp: string;
+}
+
+interface RTCIceCandidateInit {
+  candidate: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
 interface WebRTCMessage {
   type: 'offer' | 'answer' | 'ice-candidate';
   offer?: RTCSessionDescriptionInit;
