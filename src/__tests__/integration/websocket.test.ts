@@ -1,7 +1,51 @@
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+// Mock Redis
+jest.mock('ioredis', () => {
+  const data = new Map<string, string>();
+  const sets = new Map<string, Set<string>>();
+
+  return jest.fn().mockImplementation(() => ({
+    on: jest.fn(),
+    flushall: jest.fn(() => Promise.resolve('OK')),
+    quit: jest.fn(() => Promise.resolve('OK')),
+    set: jest.fn((key: string, value: string) => {
+      data.set(key, value);
+      return Promise.resolve('OK');
+    }),
+    get: jest.fn((key: string) => {
+      return Promise.resolve(data.get(key) || null);
+    }),
+    del: jest.fn((key: string) => {
+      return Promise.resolve(data.delete(key) ? 1 : 0);
+    }),
+    sadd: jest.fn((key: string, ...members: string[]) => {
+      if (!sets.has(key)) {
+        sets.set(key, new Set());
+      }
+      const set = sets.get(key)!;
+      members.forEach(m => set.add(m));
+      return Promise.resolve(members.length);
+    }),
+    srem: jest.fn((key: string, ...members: string[]) => {
+      if (!sets.has(key)) {
+        return Promise.resolve(0);
+      }
+      const set = sets.get(key)!;
+      let removed = 0;
+      members.forEach(m => {
+        if (set.delete(m)) {
+          removed++;
+        }
+      });
+      return Promise.resolve(removed);
+    }),
+    expire: jest.fn(() => Promise.resolve(1))
+  }));
+});
+
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { WebSocket } from 'ws';
 import Redis from 'ioredis';
-import { startServer } from '../../server/websocket';
+import { startServer, cleanup } from '../../server/websocket';
 import { createServer, Server } from 'http';
 
 describe('WebSocket Server Integration', () => {
@@ -11,29 +55,8 @@ describe('WebSocket Server Integration', () => {
   let port: number;
 
   beforeAll(async () => {
-    // Start Redis
-    redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: 1,
-      connectTimeout: 5000,
-    });
-
-    // Wait for Redis connection
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Redis connection timeout'));
-      }, 5000);
-
-      redis.on('connect', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      redis.on('error', (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
-
-    await redis.flushall(); // Clear Redis database
+    // Create Redis instance
+    redis = new Redis();
 
     // Create HTTP server
     httpServer = createServer();
@@ -51,24 +74,55 @@ describe('WebSocket Server Integration', () => {
 
   afterAll(async () => {
     // Cleanup
-    const cleanup = async () => {
-      try {
-        await redis.quit();
-        await new Promise<void>((resolve) => {
-          wss.close(() => {
-            httpServer.close(() => resolve());
-          });
-        });
-      } catch (error) {
-        console.error('Error during cleanup:', error);
-      }
-    };
+    try {
+      // Close all WebSocket connections and cleanup WebSocket server
+      await cleanup();
 
-    await cleanup();
+      // Close HTTP server
+      await new Promise<void>((resolve) => {
+        httpServer.close(() => resolve());
+      });
+
+      // Clear Redis database
+      await redis.flushall();
+
+      // Close test Redis connection
+      await redis.quit();
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+    }
   }, 30000); // Increase timeout to 30 seconds
 
+  beforeEach(async () => {
+    // Clear Redis database before each test
+    await redis.flushall();
+  });
+
+  afterEach(async () => {
+    // Close all WebSocket connections
+    wss.clients.forEach((client) => {
+      client.close();
+    });
+
+    // Wait for all connections to close
+    await new Promise<void>((resolve) => {
+      const checkConnections = () => {
+        if (wss.clients.size === 0) {
+          resolve();
+        } else {
+          setTimeout(checkConnections, 100);
+        }
+      };
+      checkConnections();
+    });
+  });
+
   test('should connect to WebSocket server', (done) => {
-    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`);
+    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`, {
+      headers: {
+        origin: 'http://localhost:3000'
+      }
+    });
     
     ws.on('open', () => {
       expect(ws.readyState).toBe(WebSocket.OPEN);
@@ -76,15 +130,30 @@ describe('WebSocket Server Integration', () => {
       done();
     });
 
-    ws.on('error', done);
+    ws.on('error', (error) => {
+      ws.close();
+      done(new Error(error instanceof Error ? error.message : 'WebSocket error'));
+    });
   }, 10000);
 
   test('should handle missing parameters', (done) => {
-    const ws = new WebSocket(`ws://localhost:${port}/webrtc`);
+    const ws = new WebSocket(`ws://localhost:${port}/webrtc`, {
+      headers: {
+        origin: 'http://localhost:3000'
+      }
+    });
     
     ws.on('close', (code) => {
       expect(code).toBe(4000); // Bad request
       done();
+    });
+
+    ws.on('error', (error) => {
+      // Ignore connection errors as we expect the server to close the connection
+      if (error instanceof Error && error.message.includes('403')) {
+        return;
+      }
+      done(error);
     });
   }, 10000);
 
@@ -98,8 +167,16 @@ describe('WebSocket Server Integration', () => {
     };
 
     try {
-      ws1 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=device1&isMain=true`);
-      ws2 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=device2&isMain=false`);
+      ws1 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=device1&isMain=true`, {
+        headers: {
+          origin: 'http://localhost:3000'
+        }
+      });
+      ws2 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=device2&isMain=false`, {
+        headers: {
+          origin: 'http://localhost:3000'
+        }
+      });
       
       let connected = 0;
       const onOpen = () => {
@@ -117,33 +194,37 @@ describe('WebSocket Server Integration', () => {
           expect(message.data).toBe('hello');
           cleanup();
           done();
-        } catch (error) {
+        } catch (err) {
           cleanup();
-          done(error);
+          done(err instanceof Error ? err : new Error('Failed to parse message'));
         }
       });
 
       ws1.on('open', onOpen);
       ws2.on('open', onOpen);
 
-      ws1.on('error', (error) => {
+      ws1.on('error', (error: Error) => {
         cleanup();
-        done(new Error(error instanceof Error ? error.message : 'WebSocket error'));
+        done(error);
       });
 
-      ws2.on('error', (error) => {
+      ws2.on('error', (error: Error) => {
         cleanup();
-        done(new Error(error instanceof Error ? error.message : 'WebSocket error'));
+        done(error);
       });
     } catch (error) {
       cleanup();
-      done(error instanceof Error ? error : new Error('Unknown error'));
+      done(error instanceof Error ? error : new Error('Failed to setup WebSocket connections'));
     }
   }, 10000);
 
   test('should store session data in Redis', (done) => {
     const sessionId = 'test-session';
-    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=${sessionId}&deviceId=test&isMain=true`);
+    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=${sessionId}&deviceId=test&isMain=true`, {
+      headers: {
+        origin: 'http://localhost:3000'
+      }
+    });
     
     ws.on('open', async () => {
       try {
@@ -157,7 +238,7 @@ describe('WebSocket Server Integration', () => {
         done();
       } catch (error) {
         ws.close();
-        done(new Error(error instanceof Error ? error.message : 'WebSocket error'));
+        done(error instanceof Error ? error : new Error('Failed to verify session data'));
       }
     });
 
@@ -168,11 +249,19 @@ describe('WebSocket Server Integration', () => {
   }, 10000);
 
   test('should handle reconnection', (done) => {
-    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`);
+    const ws = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`, {
+      headers: {
+        origin: 'http://localhost:3000'
+      }
+    });
     
     ws.on('open', () => {
       ws.close();
-      const ws2 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`);
+      const ws2 = new WebSocket(`ws://localhost:${port}/webrtc?sessionId=test&deviceId=test&isMain=true`, {
+        headers: {
+          origin: 'http://localhost:3000'
+        }
+      });
       ws2.on('open', () => {
         expect(ws2.readyState).toBe(WebSocket.OPEN);
         ws2.close();

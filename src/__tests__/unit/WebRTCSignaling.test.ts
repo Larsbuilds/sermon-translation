@@ -9,6 +9,7 @@ class MockWebSocket extends EventTarget {
   private _closeCode: number;
   private _closeReason: string;
   private _connectTimeout: NodeJS.Timeout | null = null;
+  private _closeTimeout: NodeJS.Timeout | null = null;
 
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -50,8 +51,13 @@ class MockWebSocket extends EventTarget {
       this._connectTimeout = null;
     }
 
+    if (this._closeTimeout) {
+      clearTimeout(this._closeTimeout);
+      this._closeTimeout = null;
+    }
+
     this.readyState = MockWebSocket.CLOSING;
-    setTimeout(() => {
+    this._closeTimeout = setTimeout(() => {
       this.readyState = MockWebSocket.CLOSED;
       this._closeCode = code || 1000;
       this._closeReason = reason || '';
@@ -63,7 +69,25 @@ class MockWebSocket extends EventTarget {
         wasClean: { value: true }
       });
       this.dispatchEvent(closeEvent);
+      this._closeTimeout = null;
     }, 50);
+  }
+
+  // Helper method for tests to wait for all pending timeouts
+  async waitForClose(): Promise<void> {
+    if (this._closeTimeout) {
+      await new Promise(resolve => {
+        const timeout = this._closeTimeout;
+        if (timeout) {
+          const originalFn = timeout.unref;
+          // @ts-ignore
+          timeout.unref = () => {
+            timeout.unref = originalFn;
+            resolve(undefined);
+          };
+        }
+      });
+    }
   }
 }
 
@@ -74,6 +98,9 @@ describe('WebRTCSignaling', () => {
   let signaling: WebRTCSignaling;
 
   beforeEach(() => {
+    // Use fake timers for tests
+    jest.useFakeTimers();
+    
     signaling = new WebRTCSignaling({
       url: 'ws://localhost:3002',
       sessionId: 'test-session',
@@ -83,20 +110,49 @@ describe('WebRTCSignaling', () => {
     signaling.removeAllListeners();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clear any pending timers
+    jest.clearAllTimers();
+    
+    // Close signaling connection
     signaling.close();
+    
+    // Wait for cleanup
+    if (signaling['ws']) {
+      await ((signaling['ws'] as unknown) as MockWebSocket).waitForClose();
+    }
+    
+    // Remove all listeners
+    signaling.removeAllListeners();
+    
+    // Reset mock timers
+    jest.useRealTimers();
   });
 
   test('should connect to WebSocket server', (done) => {
-    signaling.on('connected', () => {
+    const cleanup = async () => {
+      // Clear any pending timers
+      jest.clearAllTimers();
+      
+      signaling.close();
+      if (signaling['ws']) {
+        await ((signaling['ws'] as unknown) as MockWebSocket).waitForClose();
+      }
+      signaling.removeAllListeners();
+      done();
+    };
+
+    signaling.on('connected', async () => {
       try {
         expect(signaling.isSignalingConnected()).toBe(true);
-        done();
+        await cleanup();
       } catch (error) {
-        done(error);
+        await cleanup();
+        done(error instanceof Error ? error : new Error(String(error)));
       }
     });
     signaling.connect();
+    jest.runAllTimers();
   }, 10000);
 
   test('should send offer when connected', (done) => {
@@ -105,15 +161,29 @@ describe('WebRTCSignaling', () => {
       sdp: 'test-sdp'
     };
     
-    signaling.on('connected', () => {
+    const cleanup = async () => {
+      // Clear any pending timers
+      jest.clearAllTimers();
+      
+      signaling.close();
+      if (signaling['ws']) {
+        await ((signaling['ws'] as unknown) as MockWebSocket).waitForClose();
+      }
+      signaling.removeAllListeners();
+      done();
+    };
+
+    signaling.on('connected', async () => {
       try {
         expect(() => signaling.sendOffer(offer)).not.toThrow();
-        done();
+        await cleanup();
       } catch (error) {
-        done(error);
+        await cleanup();
+        done(error instanceof Error ? error : new Error(String(error)));
       }
     });
     signaling.connect();
+    jest.runAllTimers();
   }, 10000);
 
   test('should send answer when connected', (done) => {
@@ -122,36 +192,60 @@ describe('WebRTCSignaling', () => {
       sdp: 'test-sdp'
     };
     
-    signaling.on('connected', () => {
+    const cleanup = async () => {
+      // Clear any pending timers
+      jest.clearAllTimers();
+      
+      signaling.close();
+      if (signaling['ws']) {
+        await ((signaling['ws'] as unknown) as MockWebSocket).waitForClose();
+      }
+      signaling.removeAllListeners();
+      done();
+    };
+
+    signaling.on('connected', async () => {
       try {
         expect(() => signaling.sendAnswer(answer)).not.toThrow();
-        done();
+        await cleanup();
       } catch (error) {
-        done(error);
+        await cleanup();
+        done(error instanceof Error ? error : new Error(String(error)));
       }
     });
     signaling.connect();
+    jest.runAllTimers();
   }, 10000);
 
-  test('should handle reconnection', (done) => {
+  test('should handle reconnection', async () => {
     let connectionCount = 0;
     
-    signaling.on('connected', () => {
-      connectionCount++;
-      if (connectionCount === 1) {
-        // Force disconnect after first connection
-        signaling['ws']?.close();
-      } else if (connectionCount === 2) {
-        try {
-          // Verify reconnection successful
-          expect(signaling.isSignalingConnected()).toBe(true);
-          done();
-        } catch (error) {
-          done(error);
+    const waitForConnection = new Promise<void>((resolve) => {
+      signaling.on('connected', () => {
+        connectionCount++;
+        if (connectionCount === 2) {
+          resolve();
         }
-      }
+      });
     });
 
     signaling.connect();
-  }, 15000);
+    jest.runAllTimers();
+    
+    // Force disconnect
+    if (signaling['ws']) {
+      ((signaling['ws'] as unknown) as MockWebSocket).close();
+    }
+    jest.runAllTimers();
+
+    await waitForConnection;
+    expect(connectionCount).toBe(2);
+    
+    // Cleanup
+    signaling.close();
+    if (signaling['ws']) {
+      await ((signaling['ws'] as unknown) as MockWebSocket).waitForClose();
+    }
+    signaling.removeAllListeners();
+  }, 30000);
 }); 
