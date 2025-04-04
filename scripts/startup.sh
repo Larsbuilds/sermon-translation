@@ -8,8 +8,8 @@ echo "WS_PORT: $WS_PORT"
 echo "WS_HOST: $WS_HOST"
 echo "REDIS_URL: $REDIS_URL"
 
-# Use PORT variable from Railway or default to 8080
-PORT=${PORT:-8080}
+# Railway provides PORT environment variable, don't override it
+export PORT=${PORT:-8080}
 echo "Using PORT: $PORT"
 
 echo "Starting Redis server..."
@@ -22,7 +22,7 @@ echo "Checking Redis status..."
 redis-cli ping || echo "Redis not responding, but continuing..."
 
 echo "Starting WebSocket server..."
-PORT=$PORT node --experimental-specifier-resolution=node dist/server/websocket.js &
+node --experimental-specifier-resolution=node dist/server/websocket.js &
 SERVER_PID=$!
 
 echo "Waiting for WebSocket server to initialize (10 seconds)..."

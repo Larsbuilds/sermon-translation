@@ -15,7 +15,10 @@ if (existsSync(envPath)) {
 } else {
   console.log('No .env.ws file found, using default environment variables');
   // Set default values for required environment variables
-  process.env.WS_PORT = process.env.WS_PORT || '3002';
+  // Don't set WS_PORT if it's already set by Railway as PORT
+  if (!process.env.PORT) {
+    process.env.WS_PORT = process.env.WS_PORT || '8080';
+  }
   process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
 }
 
@@ -291,16 +294,19 @@ export const startServer = (server?: HttpServer) => {
 
     // Health check endpoint
     if (url.pathname === '/health') {
-      console.log('Health check requested via upgrade');
+      console.log('Health check requested via upgrade from:', req.socket.remoteAddress);
       const health = {
         status: 'ok',
         timestamp: new Date().toISOString(),
         connections: Array.from(connections.keys()).length,
         redis: redisStatus,
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        port: process.env.PORT || 'not set',
+        ws_port: env.WS_PORT || 'not set',
+        host: req.headers.host
       };
-      console.log('Health check response via upgrade:', health);
+      console.log('Health check response via upgrade:', JSON.stringify(health));
       const response = `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(health)}`;
       socket.write(response);
       socket.destroy();
@@ -353,16 +359,19 @@ export const startServer = (server?: HttpServer) => {
     
     // Handle health check
     if (url.pathname === '/health') {
-      console.log('Health check requested');
+      console.log('Health check requested from:', req.socket.remoteAddress);
       const health = {
         status: 'ok',
         timestamp: new Date().toISOString(),
         connections: Array.from(connections.keys()).length,
         redis: redisStatus,
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        port: process.env.PORT || 'not set',
+        ws_port: env.WS_PORT || 'not set',
+        host: req.headers.host
       };
-      console.log('Health check response:', health);
+      console.log('Health check response:', JSON.stringify(health));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(health));
       return;
@@ -379,7 +388,14 @@ export const startServer = (server?: HttpServer) => {
       console.log(`WebSocket server is running on ${host}:${port}`);
       console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
       console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-      console.log(`Environment: ${env.NODE_ENV}`);
+      console.log('Environment:', process.env.NODE_ENV || 'development');
+      console.log('Server is ready to accept connections');
+    }).on('error', (err: NodeJS.ErrnoException) => {
+      console.error('Failed to start server:', err);
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${port} is already in use. Check for other services using this port.`);
+      }
+      process.exit(1);
     });
   }
 
@@ -441,11 +457,23 @@ if (require.main === module) {
   const port = parseInt(process.env.PORT || '') || env.WS_PORT || 8080;
   const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
   
-  server.listen({ port, host }, () => {
+  console.log('Server configuration:');
+  console.log(`PORT env: ${process.env.PORT || 'not set'}`);
+  console.log(`WS_PORT env: ${env.WS_PORT || 'not set'}`);
+  console.log(`Using port: ${port}`);
+  console.log(`Using host: ${host}`);
+  
+  server.listen(port, host, () => {
     console.log(`WebSocket server is running on ${host}:${port}`);
     console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
     console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
     console.log('Environment:', process.env.NODE_ENV || 'development');
     console.log('Server is ready to accept connections');
+  }).on('error', (err: NodeJS.ErrnoException) => {
+    console.error('Failed to start server:', err);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use. Check for other services using this port.`);
+    }
+    process.exit(1);
   });
 } 
