@@ -26,12 +26,12 @@ COPY . .
 # Build the application
 RUN npm run build:ws
 
-# Expose ports
-EXPOSE 3000 3001
+# Expose WebSocket port
+EXPOSE 3002
 
 # Add healthcheck
 HEALTHCHECK --interval=10s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:3001/health || exit 1
+  CMD curl -f http://localhost:3002/health || exit 1
 
-# Start Redis and the application
-CMD ["sh", "-c", "redis-server --daemonize yes && sleep 5 && npm run start"] 
+# Start Redis and the WebSocket server
+CMD ["sh", "-c", "redis-server --daemonize yes && sleep 5 && npm run ws:prod"] 
