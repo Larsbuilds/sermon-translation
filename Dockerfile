@@ -23,7 +23,8 @@ RUN mkdir -p /var/run/redis && \
     echo "appendonly yes" >> /etc/redis/redis.conf && \
     echo "appendfsync everysec" >> /etc/redis/redis.conf && \
     echo "timeout 0" >> /etc/redis/redis.conf && \
-    echo "tcp-keepalive 300" >> /etc/redis/redis.conf
+    echo "tcp-keepalive 300" >> /etc/redis/redis.conf && \
+    echo "port 6379" >> /etc/redis/redis.conf
 
 # Create data directory for Redis
 RUN mkdir -p /data && chown redis:redis /data
@@ -54,8 +55,9 @@ ENV PORT=8080
 ENV WS_HOST=0.0.0.0
 ENV REDIS_URL=redis://localhost:6379
 
-# Expose PORT explicitly for clarity
+# Expose ports explicitly
 EXPOSE 8080
+EXPOSE 6379
 
 # Add healthcheck with more reliability
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \

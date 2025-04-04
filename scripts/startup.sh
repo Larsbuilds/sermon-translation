@@ -17,7 +17,7 @@ echo "Redis conf:"
 cat /etc/redis/redis.conf | grep -v "^#" | grep -v "^$"
 
 echo "Starting Redis server with debug logging..."
-redis-server --daemonize yes --loglevel debug
+redis-server --daemonize yes --loglevel debug --port 6379
 
 echo "Waiting for Redis to start (5 seconds)..."
 sleep 5
@@ -26,19 +26,25 @@ echo "===== REDIS STATUS ====="
 echo "Redis process:"
 ps aux | grep redis-server
 
+echo "Checking Redis port 6379:"
+netstat -tuln | grep 6379 || echo "Redis port 6379 not found in netstat!"
+
 echo "Checking Redis connection..."
-redis-cli ping || echo "Redis not responding to ping!"
-redis-cli info || echo "Redis info command failed!"
+redis-cli -h localhost -p 6379 ping || echo "Redis not responding to ping!"
+redis-cli -h localhost -p 6379 info || echo "Redis info command failed!"
 
 echo "Testing Redis operations..."
-redis-cli set test_key "test_value" || echo "Failed to set test key in Redis!"
-redis-cli get test_key || echo "Failed to get test key from Redis!"
+redis-cli -h localhost -p 6379 set test_key "test_value" || echo "Failed to set test key in Redis!"
+redis-cli -h localhost -p 6379 get test_key || echo "Failed to get test key from Redis!"
 
 echo "Checking Redis logs..."
 journalctl -u redis-server -n 50 --no-pager || echo "No systemd Redis logs found"
 cat /var/log/redis/redis-server.log 2>/dev/null || echo "No Redis log file found"
 
 echo "===== STARTING WEBSOCKET SERVER ====="
+echo "Verifying REDIS_URL environment variable:"
+echo "REDIS_URL: $REDIS_URL"
+
 echo "Starting WebSocket server with debug logging..."
 NODE_DEBUG=*,redis,net,http node --experimental-specifier-resolution=node dist/server/websocket.js &
 SERVER_PID=$!
