@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+echo "Environment Information:"
+echo "NODE_ENV: $NODE_ENV"
+echo "PORT: $PORT"
+echo "WS_PORT: $WS_PORT"
+echo "WS_HOST: $WS_HOST"
+echo "REDIS_URL: $REDIS_URL"
+
 echo "Starting Redis server..."
 redis-server --daemonize yes
 
@@ -27,6 +34,9 @@ fi
 
 echo "Checking health endpoint..."
 curl -v http://localhost:3002/health || echo "Health endpoint not responding yet, but continuing..."
+
+echo "Checking if port 3002 is in use..."
+netstat -tuln | grep 3002 || echo "Port 3002 not found in netstat"
 
 echo "Startup complete, keeping container running"
 # Keep the container running by waiting for the server process

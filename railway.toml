@@ -22,4 +22,11 @@ NODE_OPTIONS = "--experimental-specifier-resolution=node"
 REDIS_URL = "${REDIS_URL}"
 WS_PORT = "3002"
 WS_HOST = "0.0.0.0"
-MONGODB_URI = "${MONGODB_URI}" 
+MONGODB_URI = "${MONGODB_URI}"
+PORT = "3002"
+
+# Explicitly define exposed ports
+[deploy.ports]
+http.port = 3002
+http.http2 = false
+http.internal = false 

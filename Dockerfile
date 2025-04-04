@@ -2,7 +2,7 @@
 FROM node:20-slim
 
 # Install Redis, curl for healthcheck, and other utilities
-RUN apt-get update && apt-get install -y redis-server curl procps && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y redis-server curl procps net-tools && rm -rf /var/lib/apt/lists/*
 
 # Configure Redis
 RUN mkdir -p /var/run/redis && \
