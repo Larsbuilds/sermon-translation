@@ -7,7 +7,7 @@ A real-time sermon translation application using WebRTC for peer-to-peer communi
 - **Real-time Translation**: Peer-to-peer audio streaming using WebRTC
 - **Robust WebSocket Signaling**: Reliable WebRTC connection establishment
 - **Session Management**: Redis-backed session handling for scalability
-- **Automated Testing**: Comprehensive unit and integration tests
+- **Automated Testing**: Comprehensive unit and integration tests with mocking
 - **Error Resilience**: Automatic reconnection and graceful error handling
 - **Production Ready**: Configured for Railway deployment
 - **Resource Management**: Efficient cleanup of WebSocket and Redis connections
@@ -39,7 +39,7 @@ The application consists of two main components:
 
 1. **Prerequisites**
    - Node.js 18+
-   - Redis server
+   - Redis server (for production)
    - MongoDB (for user management)
 
 2. **Environment Setup**
@@ -105,20 +105,36 @@ The application is configured for deployment on Railway:
 
 The application includes comprehensive test coverage:
 
-- **Unit Tests**
-  - WebRTC signaling
+### Unit Tests
+- **WebRTC Signaling**
   - Connection state management
   - Message handling
   - Error recovery
+  - Automatic reconnection
+  - Mock WebSocket implementation for reliable testing
 
-- **Integration Tests**
-  - WebSocket server
-  - Redis session management
+### Integration Tests
+- **WebSocket Server**
+  - Redis session management with mocking
   - Message broadcasting
   - Connection handling
   - Resource cleanup
   - Rate limiting
   - CORS validation
+
+### Test Architecture
+- **Redis Mocking**
+  - In-memory implementation for tests
+  - Simulates key-value storage and sets
+  - No external Redis dependency required
+  - Fast and reliable test execution
+  - Predictable behavior for edge cases
+
+- **WebSocket Testing**
+  - Mock WebSocket implementation
+  - Simulated network conditions
+  - Connection state verification
+  - Error scenario testing
 
 ## Resource Management
 
@@ -144,6 +160,9 @@ The WebSocket server includes sophisticated resource management:
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
+   - Use provided mock implementations
+   - Add new mocks if needed
+   - Ensure tests are independent
 4. Submit a pull request
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
