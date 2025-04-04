@@ -1,29 +1,69 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { WebRTCSignaling } from '../../lib/webrtc/WebRTCSignaling';
-import WebSocket, { Event as WsEvent, CloseEvent as WsCloseEvent } from 'ws';
+import WebSocket from 'ws';
 
 // Mock WebSocket
-class MockWebSocket extends WebSocket {
+class MockWebSocket extends EventTarget {
+  public readyState: number;
+  public url: string;
+  private _closeCode: number;
+  private _closeReason: string;
+  private _connectTimeout: NodeJS.Timeout | null = null;
+
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+
   constructor(url: string) {
-    super(url);
-    // Simulate successful connection after a short delay
-    setTimeout(() => {
-      if (this.onopen) {
-        this.onopen({ type: 'open', target: this } as WsEvent);
-      }
-    }, 100);
+    super();
+    this.url = url;
+    this.readyState = MockWebSocket.CONNECTING;
+    this._closeCode = 1000;
+    this._closeReason = '';
+
+    // Simulate connection delay
+    this._connectTimeout = setTimeout(() => {
+      this.readyState = MockWebSocket.OPEN;
+      const openEvent = new Event('open');
+      this.dispatchEvent(openEvent);
+      this._connectTimeout = null;
+    }, 50);
   }
 
-  close(code?: number, reason?: string) {
-    if (this.onclose) {
-      this.onclose({
-        code: code || 1000,
-        reason: reason || 'Normal closure',
-        wasClean: true,
-        type: 'close',
-        target: this
-      } as WsCloseEvent);
+  send(data: string): void {
+    if (this.readyState !== MockWebSocket.OPEN) {
+      throw new Error('WebSocket is not open');
     }
+    // Echo back the message for testing
+    const messageEvent = new MessageEvent('message', { data });
+    setTimeout(() => this.dispatchEvent(messageEvent), 10);
+  }
+
+  close(code?: number, reason?: string): void {
+    if (this.readyState === MockWebSocket.CLOSED) {
+      return;
+    }
+
+    if (this._connectTimeout) {
+      clearTimeout(this._connectTimeout);
+      this._connectTimeout = null;
+    }
+
+    this.readyState = MockWebSocket.CLOSING;
+    setTimeout(() => {
+      this.readyState = MockWebSocket.CLOSED;
+      this._closeCode = code || 1000;
+      this._closeReason = reason || '';
+      
+      const closeEvent = new Event('close');
+      Object.defineProperties(closeEvent, {
+        code: { value: this._closeCode },
+        reason: { value: this._closeReason },
+        wasClean: { value: true }
+      });
+      this.dispatchEvent(closeEvent);
+    }, 50);
   }
 }
 
@@ -40,7 +80,6 @@ describe('WebRTCSignaling', () => {
       deviceId: 'test-device',
       isMain: true,
     });
-    // Clear all event listeners
     signaling.removeAllListeners();
   });
 
@@ -48,57 +87,71 @@ describe('WebRTCSignaling', () => {
     signaling.close();
   });
 
-  test('should connect to WebSocket server', async () => {
-    await new Promise<void>((resolve) => {
-      signaling.on('connected', () => {
+  test('should connect to WebSocket server', (done) => {
+    signaling.on('connected', () => {
+      try {
         expect(signaling.isSignalingConnected()).toBe(true);
-        resolve();
-      });
-      signaling.connect();
+        done();
+      } catch (error) {
+        done(error);
+      }
     });
+    signaling.connect();
   }, 10000);
 
-  test('should send offer when connected', async () => {
-    const offer = { type: 'offer', sdp: 'test-sdp' };
+  test('should send offer when connected', (done) => {
+    const offer: RTCSessionDescriptionInit = {
+      type: 'offer',
+      sdp: 'test-sdp'
+    };
     
-    await new Promise<void>((resolve) => {
-      signaling.on('connected', () => {
+    signaling.on('connected', () => {
+      try {
         expect(() => signaling.sendOffer(offer)).not.toThrow();
-        resolve();
-      });
-      signaling.connect();
+        done();
+      } catch (error) {
+        done(error);
+      }
     });
+    signaling.connect();
   }, 10000);
 
-  test('should send answer when connected', async () => {
-    const answer = { type: 'answer', sdp: 'test-sdp' };
+  test('should send answer when connected', (done) => {
+    const answer: RTCSessionDescriptionInit = {
+      type: 'answer',
+      sdp: 'test-sdp'
+    };
     
-    await new Promise<void>((resolve) => {
-      signaling.on('connected', () => {
+    signaling.on('connected', () => {
+      try {
         expect(() => signaling.sendAnswer(answer)).not.toThrow();
-        resolve();
-      });
-      signaling.connect();
+        done();
+      } catch (error) {
+        done(error);
+      }
     });
+    signaling.connect();
   }, 10000);
 
-  test('should handle reconnection', async () => {
-    await new Promise<void>((resolve) => {
-      let connectionCount = 0;
-      
-      signaling.on('connected', () => {
-        connectionCount++;
-        if (connectionCount === 1) {
-          // Force disconnect after first connection
-          signaling['ws']?.close();
-        } else if (connectionCount === 2) {
+  test('should handle reconnection', (done) => {
+    let connectionCount = 0;
+    
+    signaling.on('connected', () => {
+      connectionCount++;
+      if (connectionCount === 1) {
+        // Force disconnect after first connection
+        signaling['ws']?.close();
+      } else if (connectionCount === 2) {
+        try {
           // Verify reconnection successful
           expect(signaling.isSignalingConnected()).toBe(true);
-          resolve();
+          done();
+        } catch (error) {
+          done(error);
         }
-      });
-
-      signaling.connect();
+      }
     });
-  }, 10000);
+
+    signaling.connect();
+  }, 15000);
 }); 

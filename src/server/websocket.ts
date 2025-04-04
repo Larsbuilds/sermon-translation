@@ -1,13 +1,9 @@
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { config } from 'dotenv';
-import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
 import Redis from 'ioredis';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // Load environment variables from .env.ws if it exists
 const envPath = resolve(__dirname, '../../.env.ws');
@@ -98,6 +94,19 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   ws.deviceId = deviceId;
   ws.isMain = isMain;
 
+  // Add session to Redis
+  try {
+    await redis.sadd('sessions', sessionId);
+    await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
+      createdAt: new Date().toISOString(),
+      lastActive: new Date().toISOString(),
+      clientIp,
+      isMain
+    }));
+  } catch (error) {
+    console.error('Error storing session in Redis:', error);
+  }
+
   // Handle messages
   ws.on('message', async (data: Buffer) => {
     try {
@@ -110,69 +119,30 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
       // Update last active timestamp in Redis
       try {
         await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify({
-          createdAt: new Date().toISOString(),
           lastActive: new Date().toISOString(),
           clientIp
         }));
       } catch (redisError) {
         console.error('Error updating Redis:', redisError);
-        // Continue processing the message even if Redis update fails
       }
       
       // Handle WebRTC signaling messages
       const sessionConnections = connections.get(sessionId);
       if (sessionConnections) {
-        switch (parsedData.type) {
-          case 'offer':
-          case 'answer':
-            // Broadcast to all other clients in the same session
-            sessionConnections.forEach((client) => {
-              if (client !== ws && client.readyState === WS.OPEN) {
-                try {
-                  client.send(JSON.stringify({
-                    type: parsedData.type,
-                    [parsedData.type]: parsedData[parsedData.type],
-                    from: deviceId
-                  }));
-                  console.log(`Broadcasted ${parsedData.type} to device ${client.deviceId} in session ${sessionId}`);
-                } catch (sendError) {
-                  console.error('Error sending message to client:', sendError);
-                }
-              }
-            });
-            break;
-          case 'ice-candidate': {
-            const parsedData = JSON.parse(data.toString()) as WebRTCMessage;
-            console.log(`Received message in session ${ws.sessionId} from device ${ws.deviceId}:`, { type: 'ice-candidate', dataSize: parsedData.candidate ? JSON.stringify(parsedData.candidate).length : 0 });
-            // Ensure required fields are present
-            const candidate = {
-              ...parsedData.candidate,
-              sdpMid: parsedData.candidate?.sdpMid || '0',
-              sdpMLineIndex: parsedData.candidate?.sdpMLineIndex || 0
-            };
-            // Broadcast to other clients in the same session
-            const currentDeviceId = (ws as ExtendedWebSocket).deviceId;
-            if (currentDeviceId) {
-              Array.from(sessionConnections.entries()).forEach(([clientId, client]) => {
-                if (clientId !== currentDeviceId) {
-                  try {
-                    client.send(JSON.stringify({
-                      type: 'ice-candidate',
-                      candidate,
-                      from: currentDeviceId
-                    }));
-                    console.log(`Broadcasted ice-candidate to device ${clientId} in session ${ws.sessionId}`);
-                  } catch (sendError) {
-                    console.error('Error sending ICE candidate to client:', sendError);
-                  }
-                }
-              });
+        // Broadcast all messages to other clients in the same session
+        sessionConnections.forEach((client) => {
+          if (client !== ws && client.readyState === WS.OPEN) {
+            try {
+              client.send(JSON.stringify({
+                ...parsedData,
+                from: deviceId
+              }));
+              console.log(`Broadcasted ${parsedData.type} message to device ${client.deviceId} in session ${sessionId}`);
+            } catch (sendError) {
+              console.error('Error sending message to client:', sendError);
             }
-            break;
           }
-          default:
-            console.error('Unknown message type:', parsedData.type);
-        }
+        });
       }
     } catch (error) {
       console.error('Error handling message:', error);
@@ -180,13 +150,20 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   });
 
   // Handle connection close
-  ws.on('close', () => {
+  ws.on('close', async () => {
     console.log(`Connection closed for device ${deviceId} in session ${sessionId}`);
     const sessionConnections = connections.get(sessionId);
     if (sessionConnections) {
       sessionConnections.delete(deviceId);
       if (sessionConnections.size === 0) {
         connections.delete(sessionId);
+        // Remove session from Redis if no connections remain
+        try {
+          await redis.srem('sessions', sessionId);
+          await redis.del(`${SESSION_PREFIX}${sessionId}`);
+        } catch (error) {
+          console.error('Error removing session from Redis:', error);
+        }
       }
     }
   });
@@ -294,7 +271,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server if this is the main module
-if (import.meta.url === `file://${fileURLToPath(process.argv[1])}`) {
+if (require.main === module) {
   const server = createServer();
   startServer(server);
   

@@ -15,6 +15,7 @@ export class WebRTCSignaling extends EventEmitter {
   private reconnectAttempts: number = 0;
   private isConnected: boolean = false;
   private pendingIceCandidates: RTCIceCandidateInit[] = [];
+  private reconnectTimer: NodeJS.Timeout | null = null;
 
   constructor(config: SignalingConfig) {
     super();
@@ -37,31 +38,31 @@ export class WebRTCSignaling extends EventEmitter {
       console.log('Connecting to WebSocket server:', wsUrl);
       this.ws = new WebSocket(wsUrl);
 
-      this.ws.onopen = () => {
+      this.ws.addEventListener('open', () => {
         console.log('Signaling server connected');
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.emit('connected');
         this.sendPendingIceCandidates();
-      };
+      });
 
-      this.ws.onclose = (event) => {
+      this.ws.addEventListener('close', (event) => {
         console.log('Signaling server disconnected:', {
-          code: event.code,
-          reason: event.reason,
-          wasClean: event.wasClean
+          code: event instanceof CloseEvent ? event.code : 1006,
+          reason: event instanceof CloseEvent ? event.reason : 'Connection closed',
+          wasClean: event instanceof CloseEvent ? event.wasClean : false
         });
         this.isConnected = false;
-        this.handleReconnect();
         this.emit('disconnected');
-      };
+        this.handleReconnect();
+      });
 
-      this.ws.onerror = (error) => {
+      this.ws.addEventListener('error', (error) => {
         console.error('Signaling server error:', error);
         this.emit('error', error);
-      };
+      });
 
-      this.ws.onmessage = (event) => {
+      this.ws.addEventListener('message', (event) => {
         try {
           const data = JSON.parse(event.data);
           console.log('Received signaling message:', {
@@ -73,7 +74,7 @@ export class WebRTCSignaling extends EventEmitter {
         } catch (error) {
           console.error('Error parsing signaling message:', error);
         }
-      };
+      });
     } catch (error) {
       console.error('Error connecting to signaling server:', error);
       this.handleReconnect();
@@ -81,11 +82,16 @@ export class WebRTCSignaling extends EventEmitter {
   }
 
   private handleReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.reconnectAttempts < this.config.reconnectAttempts!) {
       this.reconnectAttempts++;
       const timeout = this.config.reconnectTimeout! * Math.pow(2, this.reconnectAttempts - 1);
       console.log(`Attempting to reconnect in ${timeout}ms (attempt ${this.reconnectAttempts}/${this.config.reconnectAttempts})`);
-      setTimeout(() => {
+      this.reconnectTimer = setTimeout(() => {
         if (!this.isConnected) {
           this.connect();
         }
@@ -121,41 +127,41 @@ export class WebRTCSignaling extends EventEmitter {
   }
 
   public sendOffer(offer: RTCSessionDescriptionInit): void {
-    if (!this.isConnected) {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Not connected to signaling server');
     }
 
-    this.ws?.send(JSON.stringify({
+    this.ws.send(JSON.stringify({
       type: 'offer',
       offer
     }));
   }
 
   public sendAnswer(answer: RTCSessionDescriptionInit): void {
-    if (!this.isConnected) {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Not connected to signaling server');
     }
 
-    this.ws?.send(JSON.stringify({
+    this.ws.send(JSON.stringify({
       type: 'answer',
       answer
     }));
   }
 
   public sendIceCandidate(candidate: RTCIceCandidateInit): void {
-    if (!this.isConnected) {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.pendingIceCandidates.push(candidate);
       return;
     }
 
-    this.ws?.send(JSON.stringify({
+    this.ws.send(JSON.stringify({
       type: 'ice-candidate',
       candidate
     }));
   }
 
-  public sendPendingIceCandidates(): void {
-    if (!this.isConnected) {
+  private sendPendingIceCandidates(): void {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
 
@@ -168,15 +174,20 @@ export class WebRTCSignaling extends EventEmitter {
   }
 
   public close(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
     this.isConnected = false;
     this.pendingIceCandidates = [];
+    this.removeAllListeners();
   }
 
   public isSignalingConnected(): boolean {
-    return this.isConnected;
+    return this.isConnected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 } 
