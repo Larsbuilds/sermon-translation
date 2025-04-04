@@ -432,9 +432,8 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server if this is the main module
 if (require.main === module) {
+  // Create the HTTP server
   const server = createServer();
-  startServer(server);
-  startCleanupInterval();
   
   // Use Railway's PORT first, then WS_PORT if set, then default to 8080
   const port = parseInt(process.env.PORT || '') || env.WS_PORT || 8080;
@@ -446,6 +445,10 @@ if (require.main === module) {
   console.log(`Using port: ${port}`);
   console.log(`Using host: ${host}`);
   
+  // Start WebSocket server
+  startServer(server);
+  
+  // Listen on configured port and host
   server.listen(port, host, () => {
     console.log(`WebSocket server is running on ${host}:${port}`);
     console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);

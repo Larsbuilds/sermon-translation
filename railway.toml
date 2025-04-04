@@ -6,7 +6,7 @@ dockerfilePath = "Dockerfile"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "redis-server --daemonize yes && sleep 5 && npm run ws:prod"
+startCommand = "./scripts/startup.sh"
 healthcheckPath = "/health"
 sleepApplication = false
 multiRegionConfig = { europe-west4-drams3a = { numReplicas = 1 } }
@@ -20,10 +20,8 @@ restartPolicyMaxRetries = 10
 NODE_ENV = "production"
 NODE_OPTIONS = "--experimental-specifier-resolution=node"
 REDIS_URL = "${REDIS_URL}"
-WS_PORT = "8080"
 WS_HOST = "0.0.0.0"
 MONGODB_URI = "${MONGODB_URI}"
-PORT = "8080"
 
 # Explicitly define exposed ports
 [deploy.ports]

@@ -1,55 +1,31 @@
 import { z } from 'zod';
 
-const envSchema = z.object({
-  // Application
-  NODE_ENV: z.enum(['development', 'production', 'test']),
-  PORT: z.string().transform(Number).default('3002'),
-  HOST: z.string().default('0.0.0.0'),
-  
-  // WebSocket Server
-  WS_PORT: z.string().transform(Number).default('8080'),
+// Environment variable schema for WebSocket server
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   WS_HOST: z.string().default('0.0.0.0'),
-
-  // Redis
-  REDIS_URL: z.string().url(),
+  // Default to 8080 or use process.env.PORT if available
+  WS_PORT: z.coerce
+    .number()
+    .default(() => parseInt(process.env.PORT || '8080')),
+  MONGODB_URI: z.string().min(1).default('mongodb://localhost:27017'),
+  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   REDIS_PASSWORD: z.string().optional(),
-  REDIS_TLS: z.string().transform((val) => val === 'true').default('false'),
-
-  // Security
-  ALLOWED_ORIGINS: z.string(),
-  JWT_SECRET: z.string().min(32).optional(),
-
-  // Session
-  SESSION_TTL: z.string().transform(Number).default('3600'),
-  MAX_CONNECTIONS_PER_SESSION: z.string().transform(Number).default('2'),
-  SESSION_CLEANUP_INTERVAL: z.string().transform(Number).default('300'),
-
-  // Rate Limiting
-  RATE_LIMIT_WINDOW: z.string().transform(Number).default('60000'),
-  RATE_LIMIT_MAX_PER_WINDOW: z.string().transform(Number).default('100'),
-  RATE_LIMIT_BLOCK_DURATION: z.string().transform(Number).default('300000'),
-
-  // Logging
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  LOG_FORMAT: z.enum(['dev', 'json']).default('json'),
-  ENABLE_REQUEST_LOGGING: z.string().transform((val) => val === 'true').default('true'),
-
-  // Monitoring
-  ENABLE_METRICS: z.string().transform((val) => val === 'true').default('false'),
-  METRICS_PORT: z.string().transform(Number).default('9090'),
+  REDIS_TLS: z.enum(['true', 'false']).default('false').transform((val) => val === 'true'),
+  MAX_CONNECTIONS_PER_SESSION: z.coerce.number().default(5),
+  SESSION_TTL: z.coerce.number().default(3600), // 1 hour
+  ENABLE_REQUEST_LOGGING: z.enum(['true', 'false']).default('false').transform((val) => val === 'true'),
+  ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:8080,https://sermon-translation-larsbuilds.vercel.app'),
 });
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof schema>;
 
 function validateEnv(): Env {
   try {
-    const env = envSchema.parse(process.env);
+    const env = schema.parse(process.env);
 
     // Additional validation for production
     if (env.NODE_ENV === 'production') {
-      if (!env.JWT_SECRET) {
-        throw new Error('JWT_SECRET is required in production');
-      }
       if (!env.REDIS_PASSWORD) {
         throw new Error('REDIS_PASSWORD is required in production');
       }
