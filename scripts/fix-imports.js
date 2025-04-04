@@ -5,9 +5,14 @@
  * It adds .js extensions to relative imports that don't have extensions
  */
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+// Get the directory name in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Get all TypeScript files in the src directory
 const srcDir = path.resolve(__dirname, '../src');

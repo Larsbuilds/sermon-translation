@@ -1,5 +1,5 @@
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { WebRTCSignaling } from '../../lib/webrtc/WebRTCSignaling';
+import { WebRTCSignaling } from '../../lib/webrtc/WebRTCSignaling.js';
 import WebSocket from 'ws';
 
 // Mock WebSocket
