@@ -382,23 +382,6 @@ export const startServer = (server?: HttpServer) => {
     res.end();
   });
 
-  // If no server was provided, start listening
-  if (!server) {
-    httpServer.listen(port, host, () => {
-      console.log(`WebSocket server is running on ${host}:${port}`);
-      console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-      console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-      console.log('Environment:', process.env.NODE_ENV || 'development');
-      console.log('Server is ready to accept connections');
-    }).on('error', (err: NodeJS.ErrnoException) => {
-      console.error('Failed to start server:', err);
-      if (err.code === 'EADDRINUSE') {
-        console.error(`Port ${port} is already in use. Check for other services using this port.`);
-      }
-      process.exit(1);
-    });
-  }
-
   return wss;
 };
 

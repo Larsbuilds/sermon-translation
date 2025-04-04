@@ -39,6 +39,9 @@ fi
 echo "Checking health endpoint..."
 curl -v http://localhost:$PORT/health || echo "Health endpoint not responding yet, but continuing..."
 
+echo "Checking 0.0.0.0 health endpoint..."
+curl -v http://0.0.0.0:$PORT/health || echo "0.0.0.0 health endpoint not responding, but continuing..."
+
 echo "Checking if port $PORT is in use..."
 netstat -tuln | grep $PORT || echo "Port $PORT not found in netstat"
 
