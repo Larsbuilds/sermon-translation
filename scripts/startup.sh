@@ -8,6 +8,10 @@ echo "WS_PORT: $WS_PORT"
 echo "WS_HOST: $WS_HOST"
 echo "REDIS_URL: $REDIS_URL"
 
+# Use PORT variable from Railway or default to 8080
+PORT=${PORT:-8080}
+echo "Using PORT: $PORT"
+
 echo "Starting Redis server..."
 redis-server --daemonize yes
 
@@ -18,7 +22,7 @@ echo "Checking Redis status..."
 redis-cli ping || echo "Redis not responding, but continuing..."
 
 echo "Starting WebSocket server..."
-node --experimental-specifier-resolution=node dist/server/websocket.js &
+PORT=$PORT node --experimental-specifier-resolution=node dist/server/websocket.js &
 SERVER_PID=$!
 
 echo "Waiting for WebSocket server to initialize (10 seconds)..."
@@ -33,10 +37,10 @@ else
 fi
 
 echo "Checking health endpoint..."
-curl -v http://localhost:8080/health || echo "Health endpoint not responding yet, but continuing..."
+curl -v http://localhost:$PORT/health || echo "Health endpoint not responding yet, but continuing..."
 
-echo "Checking if port 8080 is in use..."
-netstat -tuln | grep 8080 || echo "Port 8080 not found in netstat"
+echo "Checking if port $PORT is in use..."
+netstat -tuln | grep $PORT || echo "Port $PORT not found in netstat"
 
 echo "Startup complete, keeping container running"
 # Keep the container running by waiting for the server process

@@ -437,7 +437,8 @@ if (require.main === module) {
   startServer(server);
   startCleanupInterval();
   
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+  // Use Railway's PORT first, then WS_PORT if set, then default to 8080
+  const port = parseInt(process.env.PORT || '') || env.WS_PORT || 8080;
   const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
   
   server.listen({ port, host }, () => {

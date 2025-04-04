@@ -29,12 +29,15 @@ RUN chmod +x scripts/startup.sh
 # Build the application
 RUN npm run build:ws
 
-# Expose WebSocket port
-EXPOSE 8080
+# Use Railway's PORT environment variable or fallback to 8080
+ENV PORT=8080
+
+# Expose PORT dynamically
+EXPOSE ${PORT}
 
 # Add healthcheck
 HEALTHCHECK --interval=10s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Start Redis and the WebSocket server using our startup script
 CMD ["./scripts/startup.sh"] 
