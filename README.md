@@ -10,6 +10,10 @@ A real-time sermon translation application using WebRTC for peer-to-peer communi
 - **Automated Testing**: Comprehensive unit and integration tests
 - **Error Resilience**: Automatic reconnection and graceful error handling
 - **Production Ready**: Configured for Railway deployment
+- **Resource Management**: Efficient cleanup of WebSocket and Redis connections
+- **Rate Limiting**: Protection against abuse in production environment
+- **Health Monitoring**: Built-in health check endpoints
+- **CORS Protection**: Configurable origin validation
 
 ## Architecture
 
@@ -26,6 +30,10 @@ The application consists of two main components:
    - Redis session management
    - Automatic reconnection
    - Error handling and logging
+   - Session cleanup and resource management
+   - Rate limiting for production security
+   - Health check endpoints
+   - CORS validation
 
 ## Getting Started
 
@@ -61,6 +69,9 @@ The application consists of two main components:
    # Run specific test suites
    npm test WebRTCSignaling
    npm test websocket
+
+   # Run tests with open handle detection
+   npm test -- --detectOpenHandles
    ```
 
 ## Production Deployment
@@ -72,6 +83,12 @@ The application is configured for deployment on Railway:
    - `REDIS_URL`: Redis connection string
    - `PORT`: Application port (set by Railway)
    - `WS_URL`: WebSocket server URL
+   - `REDIS_PASSWORD`: Redis password for secure connections
+   - `REDIS_TLS`: Enable TLS for Redis in production
+   - `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
+   - `RATE_LIMIT_WINDOW`: Rate limiting window in milliseconds
+   - `RATE_LIMIT_MAX_PER_WINDOW`: Maximum requests per window
+   - `SESSION_TTL`: Session time-to-live in seconds
 
 2. **GitHub Actions**
    - Automated testing on pull requests
@@ -80,6 +97,9 @@ The application is configured for deployment on Railway:
 3. **Health Checks**
    - Frontend: `http://your-domain/health`
    - WebSocket: `http://your-domain/health`
+     - Returns active connections count
+     - Monitors server status
+     - Includes timestamp
 
 ## Testing
 
@@ -96,6 +116,28 @@ The application includes comprehensive test coverage:
   - Redis session management
   - Message broadcasting
   - Connection handling
+  - Resource cleanup
+  - Rate limiting
+  - CORS validation
+
+## Resource Management
+
+The WebSocket server includes sophisticated resource management:
+
+1. **Session Cleanup**
+   - Automatic cleanup of inactive sessions
+   - Configurable cleanup intervals
+   - Memory leak prevention
+
+2. **Connection Management**
+   - Maximum connections per session limit
+   - Automatic closure of stale connections
+   - Proper cleanup on server shutdown
+
+3. **Redis Connections**
+   - Lazy initialization
+   - Automatic reconnection
+   - Proper cleanup in tests and production
 
 ## Contributing
 
