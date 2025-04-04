@@ -37,7 +37,7 @@ jobs:
         run: npm i -g @railway/cli
         
       - name: Deploy to Railway
-        run: railway up --service websocket-server
+        run: railway up --service outstanding-smile
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           
