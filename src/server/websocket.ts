@@ -296,7 +296,7 @@ export const startServer = (server?: HttpServer) => {
     if (url.pathname === '/health') {
       console.log('Health check requested via upgrade from:', req.socket.remoteAddress);
       const health = {
-        status: 'ok',
+        status: redisStatus === 'ready' || redisStatus === 'connected' ? 'ok' : 'degraded',
         timestamp: new Date().toISOString(),
         connections: Array.from(connections.keys()).length,
         redis: redisStatus,
@@ -304,7 +304,9 @@ export const startServer = (server?: HttpServer) => {
         environment: process.env.NODE_ENV || 'development',
         port: process.env.PORT || 'not set',
         ws_port: env.WS_PORT || 'not set',
-        host: req.headers.host
+        host: req.headers.host,
+        pid: process.pid,
+        memory: process.memoryUsage()
       };
       console.log('Health check response via upgrade:', JSON.stringify(health));
       const response = `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(health)}`;
@@ -360,8 +362,10 @@ export const startServer = (server?: HttpServer) => {
     // Handle health check
     if (url.pathname === '/health') {
       console.log('Health check requested from:', req.socket.remoteAddress);
+      
+      // Always respond to health checks even if Redis is not connected
       const health = {
-        status: 'ok',
+        status: redisStatus === 'ready' || redisStatus === 'connected' ? 'ok' : 'degraded',
         timestamp: new Date().toISOString(),
         connections: Array.from(connections.keys()).length,
         redis: redisStatus,
@@ -369,9 +373,13 @@ export const startServer = (server?: HttpServer) => {
         environment: process.env.NODE_ENV || 'development',
         port: process.env.PORT || 'not set',
         ws_port: env.WS_PORT || 'not set',
-        host: req.headers.host
+        host: req.headers.host,
+        pid: process.pid,
+        memory: process.memoryUsage()
       };
       console.log('Health check response:', JSON.stringify(health));
+      
+      // Always return 200 for health checks to prevent Railway from restarting
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(health));
       return;

@@ -31,13 +31,14 @@ RUN npm run build:ws
 
 # Use Railway's PORT environment variable or fallback to 8080
 ENV PORT=8080
+ENV WS_HOST=0.0.0.0
 
-# Expose PORT dynamically
-EXPOSE ${PORT}
+# Expose PORT explicitly for clarity
+EXPOSE 8080
 
-# Add healthcheck
-HEALTHCHECK --interval=10s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/health || exit 1
+# Add healthcheck with more reliability
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/health || curl -f http://0.0.0.0:${PORT}/health || exit 1
 
 # Start Redis and the WebSocket server using our startup script
 CMD ["./scripts/startup.sh"] 
