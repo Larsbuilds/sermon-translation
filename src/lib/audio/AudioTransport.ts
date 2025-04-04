@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
-import { OptimizedWebSocket } from '../websocket/OptimizedWebSocket';
-import { AudioStreamer } from '../webrtc/AudioStreamer';
+import { OptimizedWebSocket } from '../websocket/OptimizedWebSocket.js';
+import { AudioStreamer } from '../webrtc/AudioStreamer.js';
 
 export interface AudioTransportConfig {
   sessionId: string;

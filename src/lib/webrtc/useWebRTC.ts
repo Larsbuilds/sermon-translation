@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { WebRTCPeerManager } from './WebRTCPeerManager';
+import { WebRTCPeerManager } from './WebRTCPeerManager.js';
 
 interface UseWebRTCConfig {
   signalingUrl: string;

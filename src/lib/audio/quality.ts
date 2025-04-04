@@ -1,4 +1,4 @@
-import { AudioQualityMetrics } from '../../types/audio';
+import { AudioQualityMetrics } from '../../types/audio.js';
 
 export function calculateAudioQuality(
   frequencyData: Uint8Array,
