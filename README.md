@@ -14,6 +14,7 @@ A real-time sermon translation application using WebRTC for peer-to-peer communi
 - **Rate Limiting**: Protection against abuse in production environment
 - **Health Monitoring**: Built-in health check endpoints
 - **CORS Protection**: Configurable origin validation
+- **CI/CD Pipeline**: Automated testing and deployment with GitHub Actions
 
 ## Architecture
 
@@ -24,6 +25,7 @@ The application consists of two main components:
    - WebRTC peer connection management
    - Real-time audio streaming
    - TypeScript for type safety
+   - Deployed on Vercel
 
 2. **WebSocket Signaling Server** (Port 3002)
    - WebRTC signaling (offer/answer/ICE candidates)
@@ -34,6 +36,7 @@ The application consists of two main components:
    - Rate limiting for production security
    - Health check endpoints
    - CORS validation
+   - Deployed on Railway
 
 ## Getting Started
 
@@ -93,6 +96,7 @@ The application is configured for deployment on Railway:
 2. **GitHub Actions**
    - Automated testing on pull requests
    - Deployment to Railway on main branch updates
+   - Automatic deployment to Vercel for frontend
 
 3. **Health Checks**
    - Frontend: `http://your-domain/health`
@@ -154,6 +158,22 @@ The WebSocket server includes sophisticated resource management:
    - Lazy initialization
    - Automatic reconnection
    - Proper cleanup in tests and production
+
+## Recent Updates
+
+### Deployment Improvements
+- **CI/CD Pipeline**: Enhanced GitHub Actions workflow
+- **Railway Integration**: Configured WebSocket server deployment
+- **Testing Resilience**: Removed external dependencies in tests
+- **Error Handling**: Improved WebRTC reconnection logic
+- **Redis Mock**: Implemented in-memory Redis for testing
+
+### Test Enhancements
+- **CloseEvent Handling**: Fixed WebRTC reconnection in Node.js environment
+- **Mock WebSocket**: Created robust test double for WebSocket connections
+- **Redis Mock Data Structure**: Added support for both key-value and set operations
+- **Integration Tests**: Made independent of external Redis instance
+- **Cleanup Logic**: Ensured proper resource cleanup in tests
 
 ## Contributing
 
