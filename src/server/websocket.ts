@@ -484,6 +484,8 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server if this is the main module
 if (require.main === module) {
+  console.log('===== STARTING MAIN WEBSOCKET SERVER MODULE =====');
+  
   // Create the HTTP server
   const server = createServer();
   
@@ -497,7 +499,7 @@ if (require.main === module) {
   console.log(`Using port: ${port}`);
   console.log(`Using host: ${host}`);
 
-  // Create a separate HTTP server just for health checks to ensure it's always responsive
+  // Create a separate HTTP server just for health checks - this should always run regardless of Redis state
   console.log('Starting dedicated health check server...');
   const healthServer = createServer((req, res) => {
     if (req.url === '/health') {
@@ -523,32 +525,92 @@ if (require.main === module) {
     }
   });
 
-  // Listen on same port but bind to localhost only
-  // Railway will still route to the main server which will forward to this
-  healthServer.listen(port + 1, host, () => {
-    console.log(`Dedicated health check server running on ${host}:${port + 1}`);
-  }).on('error', (err) => {
-    console.error('Failed to start health server:', err);
-    // Continue anyway - we'll still have the main health endpoint
-  });
+  // Start health server first to ensure Railway health checks can succeed
+  try {
+    console.log(`Starting health server on ${host}:${port + 1}...`);
+    healthServer.listen(port + 1, host, () => {
+      console.log(`Dedicated health check server running on ${host}:${port + 1}`);
+    }).on('error', (err) => {
+      console.error('Failed to start health server:', err);
+      // Continue anyway - we'll still have the main health endpoint
+    });
+  } catch (err) {
+    console.error('Error starting health server:', err);
+    // Continue execution - this should not prevent the main server from starting
+  }
   
-  // Start WebSocket server
-  startServer(server);
-  
-  // Listen on configured port and host
-  server.listen(port, host, () => {
-    console.log(`WebSocket server is running on ${host}:${port}`);
-    console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-    console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-    console.log(`Health endpoint: http://${host}:${port}/health`);
-    console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
-    console.log('Environment:', process.env.NODE_ENV || 'development');
-    console.log('Server is ready to accept connections');
-  }).on('error', (err: NodeJS.ErrnoException) => {
-    console.error('Failed to start server:', err);
-    if (err.code === 'EADDRINUSE') {
-      console.error(`Port ${port} is already in use. Check for other services using this port.`);
+  // Test Redis connection before starting WebSocket server
+  const checkRedisAndStart = async () => {
+    console.log('Testing Redis connection before starting WebSocket server...');
+    try {
+      const client = getRedis();
+      
+      if (!client) {
+        console.error('Redis client could not be created. Starting WebSocket server anyway...');
+      } else {
+        console.log('Redis client created successfully.');
+        
+        // Try a simple operation to verify Redis is working
+        try {
+          console.log('Testing Redis SET operation...');
+          await client.set('startup_test', 'ok', 'EX', 60);
+          console.log('Redis SET operation successful');
+          
+          console.log('Testing Redis GET operation...');
+          const value = await client.get('startup_test');
+          console.log('Redis GET operation successful, value:', value);
+        } catch (redisOpError) {
+          console.error('Error testing Redis operations:', redisOpError);
+          console.log('Continuing with WebSocket server startup despite Redis operation errors');
+        }
+      }
+      
+      // Start WebSocket server regardless of Redis status
+      console.log('Starting WebSocket server...');
+      startServer(server);
+      
+      // Listen on configured port and host
+      server.listen(port, host, () => {
+        console.log(`WebSocket server is running on ${host}:${port}`);
+        console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+        console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
+        console.log(`Health endpoint: http://${host}:${port}/health`);
+        console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
+        console.log('Environment:', process.env.NODE_ENV || 'development');
+        console.log('Server is ready to accept connections');
+      }).on('error', (err: NodeJS.ErrnoException) => {
+        console.error('Failed to start server:', err);
+        if (err.code === 'EADDRINUSE') {
+          console.error(`Port ${port} is already in use. Check for other services using this port.`);
+        }
+        process.exit(1);
+      });
+    } catch (error) {
+      console.error('Error during Redis check:', error);
+      
+      // Start WebSocket server despite Redis errors
+      console.log('Starting WebSocket server despite Redis errors...');
+      startServer(server);
+      
+      // Listen on configured port and host
+      server.listen(port, host, () => {
+        console.log(`WebSocket server is running on ${host}:${port}`);
+        console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+        console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
+        console.log(`Health endpoint: http://${host}:${port}/health`);
+        console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
+        console.log('Environment:', process.env.NODE_ENV || 'development');
+        console.log('Server is ready to accept connections');
+      }).on('error', (err: NodeJS.ErrnoException) => {
+        console.error('Failed to start server:', err);
+        if (err.code === 'EADDRINUSE') {
+          console.error(`Port ${port} is already in use. Check for other services using this port.`);
+        }
+        process.exit(1);
+      });
     }
-    process.exit(1);
-  });
+  };
+  
+  // Start the WebSocket server after checking Redis
+  checkRedisAndStart();
 } 

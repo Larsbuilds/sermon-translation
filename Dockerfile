@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     lsof \
     iproute2 \
     iputils-ping \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure Redis for reliability
