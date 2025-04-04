@@ -5,6 +5,10 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']),
   PORT: z.string().transform(Number).default('3002'),
   HOST: z.string().default('0.0.0.0'),
+  
+  // WebSocket Server
+  WS_PORT: z.string().transform(Number).default('3002'),
+  WS_HOST: z.string().default('0.0.0.0'),
 
   // Redis
   REDIS_URL: z.string().url(),

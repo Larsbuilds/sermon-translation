@@ -273,11 +273,15 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   });
 });
 
-let server: HttpServer | null = null;
+// Initialize HTTP server
+let httpServer: HttpServer;
 
-export function startServer(httpServer: HttpServer = createServer()) {
-  server = httpServer;
+export const startServer = (server?: HttpServer) => {
+  httpServer = server || createServer();
   
+  const host = env.WS_HOST || '0.0.0.0'; // Default to 0.0.0.0 for container deployments
+  const port = env.WS_PORT ? parseInt(env.WS_PORT, 10) : 3002;
+
   // Start cleanup interval
   startCleanupInterval();
   
@@ -369,18 +373,18 @@ export function startServer(httpServer: HttpServer = createServer()) {
     res.end();
   });
 
-  // Start listening
-  const port = parseInt(process.env.PORT || '3002', 10);
-  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
-  httpServer.listen(port, host, () => {
-    console.log(`WebSocket server is running on ${host}:${port}`);
-    console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-    console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-    console.log('Environment:', process.env.NODE_ENV || 'development');
-  });
+  // If no server was provided, start listening
+  if (!server) {
+    httpServer.listen(port, host, () => {
+      console.log(`WebSocket server is running on ${host}:${port}`);
+      console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+      console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
+      console.log(`Environment: ${env.NODE_ENV}`);
+    });
+  }
 
   return wss;
-}
+};
 
 // Cleanup function for tests
 export const cleanup = async () => {

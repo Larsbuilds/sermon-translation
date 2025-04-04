@@ -1,8 +1,8 @@
 # Use Node.js 20 as specified in package.json
 FROM node:20-slim
 
-# Install Redis and curl for healthcheck
-RUN apt-get update && apt-get install -y redis-server curl && rm -rf /var/lib/apt/lists/*
+# Install Redis, curl for healthcheck, and other utilities
+RUN apt-get update && apt-get install -y redis-server curl procps && rm -rf /var/lib/apt/lists/*
 
 # Configure Redis
 RUN mkdir -p /var/run/redis && \
@@ -23,6 +23,9 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Make startup script executable
+RUN chmod +x scripts/startup.sh
+
 # Build the application
 RUN npm run build:ws
 
@@ -33,5 +36,5 @@ EXPOSE 3002
 HEALTHCHECK --interval=10s --timeout=30s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:3002/health || exit 1
 
-# Start Redis and the WebSocket server
-CMD ["sh", "-c", "redis-server --daemonize yes && sleep 5 && npm run ws:prod"] 
+# Start Redis and the WebSocket server using our startup script
+CMD ["./scripts/startup.sh"] 
