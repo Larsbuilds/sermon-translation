@@ -547,7 +547,9 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server if this is the main module
-if (require.main === module) {
+// In ESM, import.meta.url will contain the URL of the current module
+// and will end with the current file when it's the main module
+if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
   console.log('===== STARTING MAIN WEBSOCKET SERVER MODULE =====');
   
   // Create the HTTP server
@@ -567,7 +569,7 @@ if (require.main === module) {
   console.log('Starting dedicated health check server...');
   
   // Use a very simple HTTP server for health checks that has no dependencies
-  const healthServer = require('http').createServer((req: IncomingMessage, res: ServerResponse) => {
+  const healthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
     console.log(`[Health Server] Request received: ${req.url}`);
     
     if (req.url === '/health' || req.url === '/') {

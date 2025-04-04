@@ -1,52 +1,57 @@
-// Mock Redis
-jest.mock('ioredis', () => {
-  const data = new Map<string, string>();
-  const sets = new Map<string, Set<string>>();
-
-  return jest.fn().mockImplementation(() => ({
-    on: jest.fn(),
-    flushall: jest.fn(() => Promise.resolve('OK')),
-    quit: jest.fn(() => Promise.resolve('OK')),
-    set: jest.fn((key: string, value: string) => {
-      data.set(key, value);
-      return Promise.resolve('OK');
-    }),
-    get: jest.fn((key: string) => {
-      return Promise.resolve(data.get(key) || null);
-    }),
-    del: jest.fn((key: string) => {
-      return Promise.resolve(data.delete(key) ? 1 : 0);
-    }),
-    sadd: jest.fn((key: string, ...members: string[]) => {
-      if (!sets.has(key)) {
-        sets.set(key, new Set());
-      }
-      const set = sets.get(key)!;
-      members.forEach(m => set.add(m));
-      return Promise.resolve(members.length);
-    }),
-    srem: jest.fn((key: string, ...members: string[]) => {
-      if (!sets.has(key)) {
-        return Promise.resolve(0);
-      }
-      const set = sets.get(key)!;
-      let removed = 0;
-      members.forEach(m => {
-        if (set.delete(m)) {
-          removed++;
-        }
-      });
-      return Promise.resolve(removed);
-    }),
-    expire: jest.fn(() => Promise.resolve(1))
-  }));
-});
-
 import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, jest } from '@jest/globals';
 import { WebSocket } from 'ws';
 import Redis from 'ioredis';
-import { startServer, cleanup } from '../../server/websocket';
+import { startServer, cleanup } from '../../server/websocket.js';
 import { createServer, Server } from 'http';
+
+// Mock Redis with a dynamic import mock
+// This is the ESM way to mock modules
+const mockRedisImplementation = {
+  on: jest.fn(),
+  flushall: jest.fn(() => Promise.resolve('OK')),
+  quit: jest.fn(() => Promise.resolve('OK')),
+  set: jest.fn((key: string, value: string) => {
+    mockData.set(key, value);
+    return Promise.resolve('OK');
+  }),
+  get: jest.fn((key: string) => {
+    return Promise.resolve(mockData.get(key) || null);
+  }),
+  del: jest.fn((key: string) => {
+    return Promise.resolve(mockData.delete(key) ? 1 : 0);
+  }),
+  sadd: jest.fn((key: string, ...members: string[]) => {
+    if (!mockSets.has(key)) {
+      mockSets.set(key, new Set());
+    }
+    const set = mockSets.get(key)!;
+    members.forEach(m => set.add(m));
+    return Promise.resolve(members.length);
+  }),
+  srem: jest.fn((key: string, ...members: string[]) => {
+    if (!mockSets.has(key)) {
+      return Promise.resolve(0);
+    }
+    const set = mockSets.get(key)!;
+    let removed = 0;
+    members.forEach(m => {
+      if (set.delete(m)) {
+        removed++;
+      }
+    });
+    return Promise.resolve(removed);
+  }),
+  expire: jest.fn(() => Promise.resolve(1))
+};
+
+// Setup mock data
+const mockData = new Map<string, string>();
+const mockSets = new Map<string, Set<string>>();
+
+// Mock Redis before imports
+jest.mock('ioredis', () => {
+  return jest.fn().mockImplementation(() => mockRedisImplementation);
+});
 
 describe('WebSocket Server Integration', () => {
   let redis: Redis;
