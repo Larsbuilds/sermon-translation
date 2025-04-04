@@ -41,7 +41,7 @@ The application consists of two main components:
 ## Getting Started
 
 1. **Prerequisites**
-   - Node.js 18+
+   - Node.js 20+
    - Redis server (for production)
    - MongoDB (for user management)
 
@@ -57,6 +57,9 @@ The application consists of two main components:
 
 3. **Development**
    ```bash
+   # Fix import statements for ESM compatibility
+   npm run fix-imports
+
    # Start WebSocket server
    npm run ws
 
@@ -64,18 +67,29 @@ The application consists of two main components:
    npm run dev
    ```
 
-4. **Testing**
+4. **Building for Production**
    ```bash
-   # Run all tests
+   # Build WebSocket server with ESM compatibility
+   npm run build:ws
+
+   # Build complete application
+   npm run build:prod
+   ```
+
+5. **Testing**
+   ```bash
+   # Run all tests (with ESM compatibility)
    npm test
 
-   # Run specific test suites
-   npm test WebRTCSignaling
-   npm test websocket
+   # Run specific test suites 
+   npm test:unit
+   npm test:integration
 
    # Run tests with open handle detection
    npm test -- --detectOpenHandles
    ```
+
+   > Note: Tests are configured to run with ESM compatibility using Node's experimental VM modules
 
 ## Production Deployment
 
@@ -92,13 +106,20 @@ The application is configured for deployment on Railway:
    - `RATE_LIMIT_WINDOW`: Rate limiting window in milliseconds
    - `RATE_LIMIT_MAX_PER_WINDOW`: Maximum requests per window
    - `SESSION_TTL`: Session time-to-live in seconds
+   - `NODE_OPTIONS`: Set to "--experimental-specifier-resolution=node --no-warnings" for ESM support
 
-2. **GitHub Actions**
+2. **Build Process**
+   - ESM compatibility is ensured through the `fix-imports` script
+   - TypeScript is configured for ESM with NodeNext module resolution
+   - The build pipeline automatically adds .js extensions to relative imports
+   - Import paths in the codebase use the `.js` extension for ESM compatibility
+
+3. **GitHub Actions**
    - Automated testing on pull requests
    - Deployment to Railway on main branch updates
    - Automatic deployment to Vercel for frontend
 
-3. **Health Checks**
+4. **Health Checks**
    - Frontend: `http://your-domain/health`
    - WebSocket: `http://your-domain/health`
      - Returns active connections count
@@ -161,12 +182,20 @@ The WebSocket server includes sophisticated resource management:
 
 ## Recent Updates
 
+### ESM Module Compatibility
+- **ECMAScript Modules**: Configured application for ESM compatibility
+- **Import Fixer**: Added script to automatically add .js extensions to relative imports
+- **Node.js Configuration**: Updated NODE_OPTIONS to use proper module resolution flags
+- **Build Process**: Enhanced build scripts to ensure correct module resolution
+- **TypeScript Config**: Updated for NodeNext module resolution
+- **Jest Configuration**: Updated Jest to work with ESM modules using experimental VM modules
+
 ### Deployment Improvements
-- **CI/CD Pipeline**: Enhanced GitHub Actions workflow
-- **Railway Integration**: Configured WebSocket server deployment
-- **Testing Resilience**: Removed external dependencies in tests
-- **Error Handling**: Improved WebRTC reconnection logic
-- **Redis Mock**: Implemented in-memory Redis for testing
+- **Railway Internal Networking**: Configured services to use Railway's internal network
+- **Redis Connectivity**: Enhanced Redis connection with automatic resolution and fallbacks
+- **Health Check System**: Implemented robust health monitoring with fallback servers
+- **Docker Improvements**: Updated Docker configuration for proper module resolution
+- **Environment Variable Handling**: Enhanced environment validation with Zod
 
 ### Test Enhancements
 - **CloseEvent Handling**: Fixed WebRTC reconnection in Node.js environment
