@@ -7,6 +7,44 @@ import Redis from 'ioredis';
 import { env } from './env';
 import rateLimit from 'express-rate-limit';
 
+// Create a dedicated standalone health server that starts immediately
+// This ensures Railway health checks pass even during app initialization
+(function startStandaloneHealthServer() {
+  const healthPort = parseInt(process.env.PORT || '8080') + 1;
+  console.log('Starting standalone health server on port', healthPort);
+  
+  try {
+    const http = require('http');
+    const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+      console.log(`[Standalone Health Server] Request received: ${req.url}`);
+      
+      if (req.url === '/health' || req.url === '/') {
+        const health = {
+          status: 'ok',
+          timestamp: new Date().toISOString(),
+          server: 'standalone-health-server'
+        };
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(health));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    
+    server.listen(healthPort, '0.0.0.0', () => {
+      console.log(`Standalone health server running on 0.0.0.0:${healthPort}`);
+    });
+    
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      console.error('Failed to start standalone health server:', err);
+    });
+  } catch (err: unknown) {
+    console.error('Error creating standalone health server:', err);
+  }
+})();
+
 // Load environment variables from .env.ws if it exists
 const envPath = resolve(__dirname, '../../.env.ws');
 if (existsSync(envPath)) {

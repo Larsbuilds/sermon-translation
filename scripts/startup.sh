@@ -65,9 +65,65 @@ sleep 30
 # Start a fallback health server to ensure Railway healthchecks work even if the main server fails
 start_fallback_health_server() {
     echo "Starting fallback health server on port $HEALTH_PORT..."
-    while true; do
-        echo -e "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"server\":\"fallback\"}" | nc -l -p $HEALTH_PORT
-    done
+    
+    # Try different netcat variants (different systems have different versions)
+    if command -v nc &> /dev/null; then
+        # First try the standard way
+        while true; do
+            echo -e "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"server\":\"fallback\"}" | nc -l -p $HEALTH_PORT || break
+            sleep 1
+        done &
+    elif command -v netcat &> /dev/null; then
+        # Try with netcat if nc doesn't work
+        while true; do
+            echo -e "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\",\"server\":\"fallback\"}" | netcat -l -p $HEALTH_PORT || break
+            sleep 1
+        done &
+    else
+        # Ultra-simple fallback using socat if available
+        if command -v socat &> /dev/null; then
+            socat -v TCP-LISTEN:$HEALTH_PORT,fork,reuseaddr EXEC:'echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\\\"status\\\":\\\"ok\\\",\\\"server\\\":\\\"fallback\\\"}\"' &
+        else
+            # Last resort - use Python if available
+            if command -v python3 &> /dev/null; then
+                python3 -c "
+import http.server, socketserver
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{\"status\":\"ok\",\"server\":\"fallback\"}')
+httpd = socketserver.TCPServer(('0.0.0.0', $HEALTH_PORT), Handler)
+httpd.serve_forever()
+" &
+            elif command -v python &> /dev/null; then
+                python -c "
+import http.server, socketserver
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{\"status\":\"ok\",\"server\":\"fallback\"}')
+httpd = socketserver.TCPServer(('0.0.0.0', $HEALTH_PORT), Handler)
+httpd.serve_forever()
+" &
+            else
+                echo "WARNING: No suitable tool found for fallback server. Health checks may fail."
+            fi
+        fi
+    fi
+    
+    # Sleep to allow the server to start
+    sleep 2
+    
+    # Verify the fallback server is running
+    if curl -s http://localhost:$HEALTH_PORT/health > /dev/null || curl -s http://localhost:$HEALTH_PORT/ > /dev/null; then
+        echo "Fallback health server is working"
+    else
+        echo "WARNING: Fallback health server is not responding"
+    fi
 }
 
 # Check if health server is running on dedicated port

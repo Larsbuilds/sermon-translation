@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     iputils-ping \
     netcat-openbsd \
+    socat \
+    python3-minimal \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure Redis for reliability
@@ -64,7 +66,7 @@ EXPOSE 6379
 
 # Add healthcheck with more reliability - use dedicated health port
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8081/health || curl -f http://0.0.0.0:8081/health || exit 1
+  CMD curl -f http://localhost:8081/health || curl -f http://localhost:8081/ || exit 1
 
 # Start Redis and the WebSocket server using our startup script
 CMD ["./scripts/startup.sh"] 
