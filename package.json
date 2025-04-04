@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:ws": "rm -rf dist && mkdir -p dist/server && tsc -p tsconfig.server.json && [ -f .env.ws ] && cp .env.ws dist/server/ || true",
+    "fix-imports": "node scripts/fix-imports.js",
+    "build:ws": "chmod +x scripts/fix-imports.js && npm run fix-imports && rm -rf dist && mkdir -p dist/server && tsc -p tsconfig.server.json && [ -f .env.ws ] && cp .env.ws dist/server/ || true",
     "build:prod": "npm run build:ws && npm ci --omit=dev",
     "start": "concurrently \"PORT=$PORT next start\" \"node --experimental-specifier-resolution=node dist/server/websocket.js\"",
     "ws": "NODE_OPTIONS='--loader ts-node/esm' ts-node --esm --experimental-specifier-resolution=node src/server/websocket.ts",

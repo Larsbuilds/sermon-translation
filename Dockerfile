@@ -37,6 +37,7 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY tsconfig*.json ./
 
 # Install dependencies
 RUN npm ci
@@ -44,8 +45,11 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Make startup script executable
-RUN chmod +x scripts/startup.sh
+# Make scripts executable
+RUN chmod +x scripts/startup.sh scripts/fix-imports.js
+
+# Fix import statements for ESM
+RUN node scripts/fix-imports.js
 
 # Build the application
 RUN npm run build:ws

@@ -1,21 +1,15 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "target": "ESNext",
-    "lib": ["ESNext"],
-    "outDir": "dist/server",
-    "rootDir": "src/server",
-    "noEmit": false,
-    "esModuleInterop": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
     "isolatedModules": true,
-    "incremental": true
+    "noEmit": false,
+    "sourceMap": true
   },
   "include": ["src/server/**/*"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "dist"]
 } 

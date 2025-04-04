@@ -19,7 +19,7 @@ restartPolicyMaxRetries = 10
 
 [deploy.env]
 NODE_ENV = "production"
-NODE_OPTIONS = "--experimental-specifier-resolution=node"
+NODE_OPTIONS = "--experimental-specifier-resolution=node --no-warnings"
 # Use Railway's internal DNS for Redis when deployed (internal URL)
 REDIS_URL = "redis://outstanding-smile.railway.internal:6379"
 WS_HOST = "0.0.0.0"

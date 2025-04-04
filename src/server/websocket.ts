@@ -4,7 +4,7 @@ import { config } from 'dotenv';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
 import Redis from 'ioredis';
-import { env } from './env';
+import { env } from './env.js';
 import rateLimit from 'express-rate-limit';
 
 // Create a dedicated standalone health server that starts immediately

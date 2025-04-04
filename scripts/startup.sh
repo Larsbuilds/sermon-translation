@@ -55,6 +55,7 @@ echo "Verifying REDIS_URL environment variable:"
 echo "REDIS_URL: $REDIS_URL"
 
 echo "Starting WebSocket server with debug logging..."
+# Use proper ESM flags for Node.js and preserve original experimental resolution flag
 NODE_DEBUG=*,redis,net,http node --experimental-specifier-resolution=node dist/server/websocket.js > /app/logs/websocket.log 2>&1 &
 SERVER_PID=$!
 
