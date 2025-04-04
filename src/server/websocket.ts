@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket as WS } from 'ws';
-import { createServer } from 'http';
+import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
@@ -195,90 +195,38 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3002;
 const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
-const server = createServer();
+export const startServer = (httpServer: Server = createServer()) => {
+  // Handle WebSocket upgrade requests
+  httpServer.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url || '', `http://${request.headers.host}`);
 
-// Handle WebSocket upgrade requests
-server.on('upgrade', (request, socket, head) => {
-  const url = new URL(request.url || '', `http://${request.headers.host}`);
-  console.log('Received WebSocket upgrade request:', {
-    path: url.pathname,
-    query: Object.fromEntries(url.searchParams),
-    headers: request.headers
-  });
-  
-  try {
     if (url.pathname === '/webrtc' || url.pathname === '/ws') {
-      console.log('Handling WebSocket connection for path:', url.pathname);
       wss.handleUpgrade(request, socket, head, (ws) => {
-        console.log('WebSocket upgrade successful, emitting connection');
         wss.emit('connection', ws, request);
       });
     } else {
-      console.log('Rejecting WebSocket connection for unknown path:', url.pathname);
-      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
     }
-  } catch (error) {
-    console.error('Error handling WebSocket upgrade:', error);
-    socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
-    socket.destroy();
-  }
-});
-
-// Handle HTTP requests
-server.on('request', (req, res) => {
-  const url = new URL(req.url || '', `http://${req.headers.host}`);
-  console.log('Received HTTP request:', {
-    method: req.method,
-    path: url.pathname,
-    headers: req.headers
   });
-  
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
+
+  // Handle HTTP requests
+  httpServer.on('request', (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    
+    // Handle health check
+    if (url.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+
+    // Handle all other requests
+    res.writeHead(404);
     res.end();
-    return;
-  }
-  
-  if (url.pathname === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      message: 'WebSocket server is running',
-      endpoints: {
-        health: '/health',
-        websocket: '/webrtc'
-      },
-      connections: Array.from(connections.entries()).map(([sessionId, devices]) => ({
-        sessionId,
-        deviceCount: devices.size,
-        devices: Array.from(devices.keys())
-      }))
-    }));
-    return;
-  }
-  
-  if (url.pathname === '/') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      message: 'WebSocket server is running',
-      endpoints: {
-        health: '/health',
-        websocket: '/webrtc'
-      }
-    }));
-    return;
-  }
-  
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
+  });
+
+  return wss;
+};
 
 // Handle graceful shutdown
 const shutdown = async () => {
@@ -326,7 +274,7 @@ const shutdown = async () => {
   }
   
   // Close the HTTP server
-  server.close(() => {
+  httpServer.close(() => {
     console.log('HTTP server closed');
     process.exit(0);
   });
@@ -345,24 +293,16 @@ process.on('unhandledRejection', (reason, promise) => {
   shutdown();
 });
 
-// Start the server
-const startServer = async () => {
-  try {
-    await redis.ping();
-    console.log('Redis is responding to ping');
-    
-    server.listen({ port, host }, () => {
-      console.log(`WebSocket server is running on ${host}:${port}`);
-      console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-      console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-      console.log('Environment:', process.env.NODE_ENV || 'development');
-      console.log('Healthcheck available at http://' + host + ':' + port + '/health');
-      console.log('Server is ready to accept connections');
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-startServer(); 
+// Start server if this is the main module
+if (import.meta.url === `file://${fileURLToPath(process.argv[1])}`) {
+  const server = createServer();
+  startServer(server);
+  
+  server.listen({ port, host }, () => {
+    console.log(`WebSocket server is running on ${host}:${port}`);
+    console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+    console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
+    console.log('Environment:', process.env.NODE_ENV || 'development');
+    console.log('Server is ready to accept connections');
+  });
+} 

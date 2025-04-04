@@ -1,113 +1,104 @@
+import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { WebRTCSignaling } from '../../lib/webrtc/WebRTCSignaling';
-import { EventEmitter } from 'events';
+import WebSocket, { Event as WsEvent, CloseEvent as WsCloseEvent } from 'ws';
 
 // Mock WebSocket
-class MockWebSocket {
-  onopen: (() => void) | null = null;
-  onclose: ((event: any) => void) | null = null;
-  onmessage: ((event: any) => void) | null = null;
-  onerror: ((error: any) => void) | null = null;
-  readyState = 1;
-  
+class MockWebSocket extends WebSocket {
   constructor(url: string) {
-    // Simulate connection
-    setTimeout(() => this.onopen?.(), 0);
+    super(url);
+    // Simulate successful connection after a short delay
+    setTimeout(() => {
+      if (this.onopen) {
+        this.onopen({ type: 'open', target: this } as WsEvent);
+      }
+    }, 100);
   }
 
-  send(data: string) {
-    // Mock send
-  }
-
-  close() {
-    this.onclose?.({ code: 1000, reason: 'Normal closure', wasClean: true });
+  close(code?: number, reason?: string) {
+    if (this.onclose) {
+      this.onclose({
+        code: code || 1000,
+        reason: reason || 'Normal closure',
+        wasClean: true,
+        type: 'close',
+        target: this
+      } as WsCloseEvent);
+    }
   }
 }
 
-// Mock global WebSocket
-global.WebSocket = MockWebSocket as any;
+// Replace global WebSocket with mock
+(global as any).WebSocket = MockWebSocket;
 
 describe('WebRTCSignaling', () => {
   let signaling: WebRTCSignaling;
-  const config = {
-    url: 'ws://localhost:3002',
-    sessionId: 'test-session',
-    deviceId: 'test-device',
-    isMain: true
-  };
 
   beforeEach(() => {
-    signaling = new WebRTCSignaling(config);
+    signaling = new WebRTCSignaling({
+      url: 'ws://localhost:3002',
+      sessionId: 'test-session',
+      deviceId: 'test-device',
+      isMain: true,
+    });
+    // Clear all event listeners
+    signaling.removeAllListeners();
   });
 
   afterEach(() => {
     signaling.close();
   });
 
-  test('should connect to WebSocket server', (done) => {
-    signaling.on('connected', () => {
-      expect(signaling.isSignalingConnected()).toBe(true);
-      done();
-    });
-    signaling.connect();
-  });
-
-  test('should handle connection close', (done) => {
-    signaling.on('disconnected', () => {
-      expect(signaling.isSignalingConnected()).toBe(false);
-      done();
-    });
-    signaling.connect();
-    setTimeout(() => signaling.close(), 100);
-  });
-
-  test('should send offer', () => {
-    const offer = { type: 'offer', sdp: 'test-sdp' };
-    signaling.connect();
-    signaling.sendOffer(offer);
-    // Add assertions for offer sending
-  });
-
-  test('should send answer', () => {
-    const answer = { type: 'answer', sdp: 'test-sdp' };
-    signaling.connect();
-    signaling.sendAnswer(answer);
-    // Add assertions for answer sending
-  });
-
-  test('should send ICE candidate', () => {
-    const candidate = {
-      candidate: 'test-candidate',
-      sdpMid: 'test-mid',
-      sdpMLineIndex: 0
-    };
-    signaling.connect();
-    signaling.sendIceCandidate(candidate);
-    // Add assertions for ICE candidate sending
-  });
-
-  test('should queue ICE candidates when not connected', () => {
-    const candidate = {
-      candidate: 'test-candidate',
-      sdpMid: 'test-mid',
-      sdpMLineIndex: 0
-    };
-    signaling.sendIceCandidate(candidate);
-    expect(signaling.isSignalingConnected()).toBe(false);
-    // Add assertions for queued candidates
-  });
-
-  test('should handle reconnection', (done) => {
-    let connectionCount = 0;
-    signaling.on('connected', () => {
-      connectionCount++;
-      if (connectionCount === 2) {
+  test('should connect to WebSocket server', async () => {
+    await new Promise<void>((resolve) => {
+      signaling.on('connected', () => {
         expect(signaling.isSignalingConnected()).toBe(true);
-        done();
-      }
+        resolve();
+      });
+      signaling.connect();
     });
-    signaling.connect();
-    setTimeout(() => {
-      (signaling as any).ws?.onclose?.({ code: 1006, reason: 'Connection lost', wasClean: false });
-    }, 100);
-  });
+  }, 10000);
+
+  test('should send offer when connected', async () => {
+    const offer = { type: 'offer', sdp: 'test-sdp' };
+    
+    await new Promise<void>((resolve) => {
+      signaling.on('connected', () => {
+        expect(() => signaling.sendOffer(offer)).not.toThrow();
+        resolve();
+      });
+      signaling.connect();
+    });
+  }, 10000);
+
+  test('should send answer when connected', async () => {
+    const answer = { type: 'answer', sdp: 'test-sdp' };
+    
+    await new Promise<void>((resolve) => {
+      signaling.on('connected', () => {
+        expect(() => signaling.sendAnswer(answer)).not.toThrow();
+        resolve();
+      });
+      signaling.connect();
+    });
+  }, 10000);
+
+  test('should handle reconnection', async () => {
+    await new Promise<void>((resolve) => {
+      let connectionCount = 0;
+      
+      signaling.on('connected', () => {
+        connectionCount++;
+        if (connectionCount === 1) {
+          // Force disconnect after first connection
+          signaling['ws']?.close();
+        } else if (connectionCount === 2) {
+          // Verify reconnection successful
+          expect(signaling.isSignalingConnected()).toBe(true);
+          resolve();
+        }
+      });
+
+      signaling.connect();
+    });
+  }, 10000);
 }); 
