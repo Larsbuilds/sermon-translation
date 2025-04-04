@@ -1,7 +1,9 @@
 import { beforeAll, afterAll } from '@jest/globals';
+import ws from 'ws';
 
 // Mock global WebSocket for Node.js environment
-global.WebSocket = require('ws');
+// Use type assertion to make TypeScript happy
+global.WebSocket = ws as unknown as typeof WebSocket;
 
 // Set up environment variables for testing
 Object.defineProperty(process.env, 'NODE_ENV', { value: 'test' });

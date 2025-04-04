@@ -3,9 +3,15 @@ import { Server as HttpServer, IncomingMessage, ServerResponse, createServer } f
 import { config } from 'dotenv';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import http from 'http';
 import Redis from 'ioredis';
 import { env } from './env.js';
 import rateLimit from 'express-rate-limit';
+
+// Get the directory name in ESM module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Create a dedicated standalone health server that starts immediately
 // This ensures Railway health checks pass even during app initialization
@@ -14,7 +20,6 @@ import rateLimit from 'express-rate-limit';
   console.log('Starting standalone health server on port', healthPort);
   
   try {
-    const http = require('http');
     const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
       console.log(`[Standalone Health Server] Request received: ${req.url}`);
       
