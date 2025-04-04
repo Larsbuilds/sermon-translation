@@ -11,9 +11,9 @@ healthcheckPath = "/health"
 sleepApplication = false
 multiRegionConfig = { europe-west4-drams3a = { numReplicas = 1 } }
 restartPolicyType = "ON_FAILURE"
-healthcheckTimeout = 30
-healthcheckInterval = 10
-healthcheckStartPeriod = 120
+healthcheckTimeout = 60
+healthcheckInterval = 15
+healthcheckStartPeriod = 300
 restartPolicyMaxRetries = 10
 
 [deploy.env]

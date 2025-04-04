@@ -21,29 +21,46 @@ if (existsSync(envPath)) {
 
 // Initialize Redis client with retry strategy
 let redisClient: Redis | null = null;
+let redisStatus = 'not_initialized';
 
 export const getRedis = () => {
   if (!redisClient) {
+    console.log('Initializing Redis connection to:', env.REDIS_URL);
     redisClient = new Redis(env.REDIS_URL, {
       password: env.REDIS_PASSWORD,
       tls: env.REDIS_TLS ? {} : undefined,
-      maxRetriesPerRequest: 1,
+      maxRetriesPerRequest: 3,
+      connectTimeout: 10000,
       retryStrategy(times: number) {
-        const delay = Math.min(times * 50, 2000);
+        const delay = Math.min(times * 100, 3000);
+        console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
         return delay;
       }
     });
 
     redisClient.on('connect', () => {
       console.log('Connected to Redis');
+      redisStatus = 'connected';
     });
 
     redisClient.on('error', (error) => {
       console.error('Redis error:', error);
+      redisStatus = 'error';
     });
 
     redisClient.on('ready', () => {
       console.log('Redis is ready');
+      redisStatus = 'ready';
+    });
+
+    redisClient.on('close', () => {
+      console.log('Redis connection closed');
+      redisStatus = 'closed';
+    });
+
+    redisClient.on('reconnecting', () => {
+      console.log('Redis reconnecting');
+      redisStatus = 'reconnecting';
     });
   }
   return redisClient;
@@ -51,6 +68,21 @@ export const getRedis = () => {
 
 // Export Redis client for testing
 export const redis = getRedis();
+
+// Safe Redis operations with fallbacks
+export const safeRedisOp = async <T>(operation: () => Promise<T>, fallback: T): Promise<T> => {
+  if (!redisClient || redisStatus === 'error' || redisStatus === 'closed') {
+    console.log('Redis not available, using fallback');
+    return fallback;
+  }
+
+  try {
+    return await operation();
+  } catch (error) {
+    console.error('Redis operation failed:', error);
+    return fallback;
+  }
+};
 
 // Session cleanup interval
 let cleanupInterval: NodeJS.Timeout | null = null;
@@ -168,7 +200,7 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   ws.lastActivity = Date.now();
 
   // Store session in Redis
-  try {
+  await safeRedisOp(async () => {
     await redis.sadd('sessions', sessionId);
     await redis.set(`ws:session:${sessionId}`, JSON.stringify({
       createdAt: new Date().toISOString(),
@@ -176,9 +208,8 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
       clientIp,
       isMain
     }), 'EX', env.SESSION_TTL);
-  } catch (error) {
-    console.error('Error storing session in Redis:', error);
-  }
+    return true;
+  }, false);
 
   // Handle messages
   ws.on('message', async (data: Buffer) => {
@@ -194,11 +225,10 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
       }
 
       // Update session TTL in Redis
-      try {
+      await safeRedisOp(async () => {
         await redis.expire(`ws:session:${sessionId}`, env.SESSION_TTL);
-      } catch (error) {
-        console.error('Error updating Redis TTL:', error);
-      }
+        return true;
+      }, false);
 
       // Broadcast message to other clients in session
       const sessionConnections = connections.get(sessionId);
@@ -233,12 +263,11 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
       if (sessionConnections.size === 0) {
         connections.delete(sessionId);
         // Remove session from Redis if no connections remain
-        try {
+        await safeRedisOp(async () => {
           await redis.del(`ws:session:${sessionId}`);
           await redis.srem('sessions', sessionId);
-        } catch (error) {
-          console.error('Error removing session from Redis:', error);
-        }
+          return true;
+        }, false);
       }
     }
   });
@@ -258,11 +287,17 @@ export function startServer(httpServer: HttpServer = createServer()) {
 
     // Health check endpoint
     if (url.pathname === '/health') {
-      const response = `HTTP/1.1 200 OK\r\n\r\n${JSON.stringify({
+      console.log('Health check requested via upgrade');
+      const health = {
         status: 'ok',
         timestamp: new Date().toISOString(),
-        connections: Array.from(connections.keys()).length
-      })}`;
+        connections: Array.from(connections.keys()).length,
+        redis: redisStatus,
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+      };
+      console.log('Health check response via upgrade:', health);
+      const response = `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(health)}`;
       socket.write(response);
       socket.destroy();
       return;
@@ -314,8 +349,18 @@ export function startServer(httpServer: HttpServer = createServer()) {
     
     // Handle health check
     if (url.pathname === '/health') {
+      console.log('Health check requested');
+      const health = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        connections: Array.from(connections.keys()).length,
+        redis: redisStatus,
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+      };
+      console.log('Health check response:', health);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok' }));
+      res.end(JSON.stringify(health));
       return;
     }
 
