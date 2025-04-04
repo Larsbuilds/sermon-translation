@@ -8,7 +8,7 @@ import { AudioQualityMetrics } from '../../../types/audio';
 import AudioVisualizer from './AudioVisualizer';
 import { useSession } from '../../contexts/SessionContext';
 import { Button } from '../../../components/ui/button';
-import { getWebSocketUrl } from '../../../config/websocket';
+import { websocketConfig } from '../../../config/websocket';
 
 interface AudioCaptureProps {
   onAudioData?: (frequencyData: Uint8Array, timeData: Uint8Array) => void;
@@ -46,7 +46,7 @@ export default function AudioCapture({
   const websocketRef = useRef<WebSocket | null>(null);
 
   const currentSession = sessionId ? sessions.find(s => s.id === sessionId) : null;
-  const participants = currentSession?.listeners || 0;
+  const participants = currentSession?.listenerCount || 0;
 
   const handleQuitCall = useCallback(() => {
     if (sessionId) {
@@ -97,6 +97,7 @@ export default function AudioCapture({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setHasPermission(true);
+      mediaStreamRef.current = stream;
       setupAudioContext(stream);
     } catch (error) {
       console.error('Error requesting microphone permission:', error);
@@ -120,7 +121,7 @@ export default function AudioCapture({
       // Request microphone permission first
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setHasPermission(true);
-      setStream(stream);
+      mediaStreamRef.current = stream;
 
       // Create audio context and analyzer
       const audioContext = new AudioContext();
@@ -131,7 +132,7 @@ export default function AudioCapture({
 
       // Create WebSocket connection
       console.log('Connecting to WebSocket server...');
-      const ws = new WebSocket(getWebSocketUrl(sessionId));
+      const ws = new WebSocket(`${websocketConfig.websocketUrl}?sessionId=${sessionId}`);
       websocketRef.current = ws;
 
       ws.onopen = () => {

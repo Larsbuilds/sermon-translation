@@ -192,8 +192,8 @@ wss.on('connection', async (ws: ExtendedWebSocket, req) => {
   });
 });
 
-const PORT = parseInt(process.env.WS_PORT || '3002', 10);
-const HOST = process.env.WS_HOST || '0.0.0.0';
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3002;
+const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
 const server = createServer();
 
@@ -351,12 +351,12 @@ const startServer = async () => {
     await redis.ping();
     console.log('Redis is responding to ping');
     
-    server.listen(PORT, HOST, () => {
-      console.log(`WebSocket server is running on ${HOST}:${PORT}`);
+    server.listen({ port, host }, () => {
+      console.log(`WebSocket server is running on ${host}:${port}`);
+      console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
+      console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
       console.log('Environment:', process.env.NODE_ENV || 'development');
-      console.log('WS_HOST:', process.env.WS_HOST);
-      console.log('WS_PORT:', process.env.WS_PORT);
-      console.log('Healthcheck available at http://' + HOST + ':' + PORT + '/health');
+      console.log('Healthcheck available at http://' + host + ':' + port + '/health');
       console.log('Server is ready to accept connections');
     });
   } catch (error) {

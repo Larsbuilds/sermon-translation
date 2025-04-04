@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import AudioVisualizer from './AudioVisualizer';
-import { getWebSocketUrl } from '../../../config/websocket';
+import { websocketConfig } from '../../../config/websocket';
 
 interface AudioPlaybackProps {
   sessionId: string;
@@ -64,7 +64,7 @@ export default function AudioPlayback({ sessionId }: AudioPlaybackProps) {
 
       // Create WebSocket connection
       console.log('Connecting to WebSocket server...');
-      const ws = new WebSocket(getWebSocketUrl(sessionId));
+      const ws = new WebSocket(`${websocketConfig.websocketUrl}?sessionId=${sessionId}`);
       websocketRef.current = ws;
 
       ws.onopen = () => {
@@ -93,10 +93,11 @@ export default function AudioPlayback({ sessionId }: AudioPlaybackProps) {
 
           if (data.type === 'audio' && data.frequencyData && data.timeData) {
             // Update visualizer data
-            setVisualizerData({
-              frequencyData: new Uint8Array(data.frequencyData),
-              timeData: new Uint8Array(data.timeData)
-            });
+            const newFrequencyData = new Uint8Array(data.frequencyData);
+            const newTimeData = new Uint8Array(data.timeData);
+            setFrequencyData(newFrequencyData);
+            setTimeData(newTimeData);
+            visualizerDataRef.current = { frequencyData: newFrequencyData, timeData: newTimeData };
 
             // Add to audio queue
             const audioData = new Float32Array(data.timeData);
