@@ -1,18 +1,110 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sermon Translation App
+
+A real-time sermon translation application using WebRTC for peer-to-peer communication and WebSocket for signaling.
+
+## Features
+
+- **Real-time Translation**: Peer-to-peer audio streaming using WebRTC
+- **Robust WebSocket Signaling**: Reliable WebRTC connection establishment
+- **Session Management**: Redis-backed session handling for scalability
+- **Automated Testing**: Comprehensive unit and integration tests
+- **Error Resilience**: Automatic reconnection and graceful error handling
+- **Production Ready**: Configured for Railway deployment
+
+## Architecture
+
+The application consists of two main components:
+
+1. **Next.js Frontend** (Port 3000)
+   - Modern React-based UI
+   - WebRTC peer connection management
+   - Real-time audio streaming
+   - TypeScript for type safety
+
+2. **WebSocket Signaling Server** (Port 3002)
+   - WebRTC signaling (offer/answer/ICE candidates)
+   - Redis session management
+   - Automatic reconnection
+   - Error handling and logging
 
 ## Getting Started
 
-First, run the development server:
+1. **Prerequisites**
+   - Node.js 18+
+   - Redis server
+   - MongoDB (for user management)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+2. **Environment Setup**
+   ```bash
+   # Copy environment templates
+   cp .env.example .env.local
+   cp .env.ws.example .env.ws
+
+   # Install dependencies
+   npm install
+   ```
+
+3. **Development**
+   ```bash
+   # Start WebSocket server
+   npm run ws
+
+   # In a new terminal, start Next.js development server
+   npm run dev
+   ```
+
+4. **Testing**
+   ```bash
+   # Run all tests
+   npm test
+
+   # Run specific test suites
+   npm test WebRTCSignaling
+   npm test websocket
+   ```
+
+## Production Deployment
+
+The application is configured for deployment on Railway:
+
+1. **Required Environment Variables**
+   - `MONGODB_URI`: MongoDB connection string
+   - `REDIS_URL`: Redis connection string
+   - `PORT`: Application port (set by Railway)
+   - `WS_URL`: WebSocket server URL
+
+2. **GitHub Actions**
+   - Automated testing on pull requests
+   - Deployment to Railway on main branch updates
+
+3. **Health Checks**
+   - Frontend: `http://your-domain/health`
+   - WebSocket: `http://your-domain/health`
+
+## Testing
+
+The application includes comprehensive test coverage:
+
+- **Unit Tests**
+  - WebRTC signaling
+  - Connection state management
+  - Message handling
+  - Error recovery
+
+- **Integration Tests**
+  - WebSocket server
+  - Redis session management
+  - Message broadcasting
+  - Connection handling
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
+
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
