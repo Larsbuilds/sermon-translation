@@ -16,6 +16,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  output: 'standalone',
+  poweredByHeader: false,
 };
 
 export default nextConfig;
