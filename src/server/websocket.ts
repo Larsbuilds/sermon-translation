@@ -8,7 +8,7 @@ import Redis, { Redis as RedisClient } from 'ioredis';
 import rateLimit from 'express-rate-limit';
 import { parse } from 'url';
 import { Socket } from 'net';
-import { env } from './env.ts';
+import { env } from './env.js';
 
 // Get the directory name
 const __filename = fileURLToPath(import.meta.url);

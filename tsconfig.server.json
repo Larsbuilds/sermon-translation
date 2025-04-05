@@ -8,7 +8,9 @@
     "rootDir": "src",
     "isolatedModules": true,
     "noEmit": false,
-    "sourceMap": true
+    "sourceMap": true,
+    "allowImportingTsExtensions": false,
+    "jsx": "preserve"
   },
   "include": ["src/server/**/*"],
   "exclude": ["node_modules", "dist"]
