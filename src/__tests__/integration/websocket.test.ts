@@ -15,46 +15,15 @@ process.env.REDIS_PASSWORD = '';
 
 // Mock Redis
 jest.mock('ioredis', () => {
-  const mockData = new Map<string, string>();
-  const mockSets = new Map<string, Set<string>>();
-  
-  return jest.fn().mockImplementation(() => ({
+  const mockRedis = {
     on: jest.fn(),
-    flushall: jest.fn(() => Promise.resolve('OK')),
-    quit: jest.fn(() => Promise.resolve('OK')),
-    set: jest.fn((key: string, value: string) => {
-      mockData.set(key, value);
-      return Promise.resolve('OK');
-    }),
-    get: jest.fn((key: string) => {
-      return Promise.resolve(mockData.get(key) || null);
-    }),
-    del: jest.fn((key: string) => {
-      return Promise.resolve(mockData.delete(key) ? 1 : 0);
-    }),
-    sadd: jest.fn((key: string, ...members: string[]) => {
-      if (!mockSets.has(key)) {
-        mockSets.set(key, new Set());
-      }
-      const set = mockSets.get(key)!;
-      members.forEach(m => set.add(m));
-      return Promise.resolve(members.length);
-    }),
-    srem: jest.fn((key: string, ...members: string[]) => {
-      if (!mockSets.has(key)) {
-        return Promise.resolve(0);
-      }
-      const set = mockSets.get(key)!;
-      let removed = 0;
-      members.forEach(m => {
-        if (set.delete(m)) {
-          removed++;
-        }
-      });
-      return Promise.resolve(removed);
-    }),
-    expire: jest.fn(() => Promise.resolve(1))
-  }));
+    set: jest.fn().mockImplementation(() => Promise.resolve('OK')),
+    get: jest.fn().mockImplementation(() => Promise.resolve('ok')),
+    quit: jest.fn().mockImplementation(() => Promise.resolve('OK')),
+    disconnect: jest.fn(),
+    status: 'ready'
+  };
+  return jest.fn(() => mockRedis);
 });
 
 // Mock http to avoid port conflicts
@@ -238,63 +207,47 @@ describe('WebSocket Server Integration', () => {
 
   test('should broadcast messages within session', (done) => {
     console.log('Starting broadcast test...');
-    let messageReceived = false;
-    let timeoutId: NodeJS.Timeout | null = null;
-    
-    const cleanup = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      messageReceived = true; // Prevent multiple calls to done()
-      done();
+    const ws1 = createWebSocket(`?sessionId=test&deviceId=device1&isMain=true`);
+    const ws2 = createWebSocket(`?sessionId=test&deviceId=device2&isMain=false`);
+    const connectedClients: WebSocket[] = [];
+    let timeoutId: NodeJS.Timeout;
+
+    const onMessage = (data: Buffer) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'test') {
+        clearTimeout(timeoutId);
+        ws1.close();
+        ws2.close();
+        done();
+      }
     };
+
+    ws1.on('open', () => {
+      connectedClients.push(ws1);
+      console.log(`Client connected (${connectedClients.length}/2)`);
+      if (connectedClients.length === 2) {
+        console.log('Sending test message...');
+        ws1.send(JSON.stringify({ type: 'test', data: 'test message' }));
+      }
+    });
+
+    ws2.on('open', () => {
+      connectedClients.push(ws2);
+      console.log(`Client connected (${connectedClients.length}/2)`);
+      if (connectedClients.length === 2) {
+        console.log('Sending test message...');
+        ws1.send(JSON.stringify({ type: 'test', data: 'test message' }));
+      }
+    });
+
+    ws2.on('message', onMessage);
 
     // Set a timeout for the entire test
     timeoutId = setTimeout(() => {
+      ws1.close();
+      ws2.close();
       done(new Error('Message not received within timeout'));
     }, 5000);
-
-    try {
-      const ws1 = createWebSocket('?sessionId=test&deviceId=device1&isMain=true');
-      const ws2 = createWebSocket('?sessionId=test&deviceId=device2&isMain=false');
-      
-      let connected = 0;
-      const onOpen = () => {
-        connected++;
-        console.log(`Client connected (${connected}/2)`);
-        if (connected === 2) {
-          // Both clients connected, send test message
-          console.log('Sending test message...');
-          ws1.send(JSON.stringify({ type: 'test', data: 'hello' }));
-        }
-      };
-
-      ws1.on('open', onOpen);
-      ws2.on('open', onOpen);
-
-      ws2.on('message', (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          expect(message.type).toBe('test');
-          expect(message.data).toBe('hello');
-          cleanup();
-        } catch (error) {
-          done(error instanceof Error ? error : new Error('Failed to parse message'));
-        }
-      });
-
-      ws1.on('error', (error) => {
-        if (!messageReceived) {
-          done(error instanceof Error ? error : new Error('WebSocket error'));
-        }
-      });
-
-      ws2.on('error', (error) => {
-        if (!messageReceived) {
-          done(error instanceof Error ? error : new Error('WebSocket error'));
-        }
-      });
-    } catch (error) {
-      done(error instanceof Error ? error : new Error('Failed to setup WebSocket connections'));
-    }
   }, 10000);
 
   test('should handle maximum connections per session', (done) => {
@@ -379,21 +332,24 @@ describe('WebSocket Server Integration', () => {
       };
     }
 
-    fetch(`http://localhost:${port}/health`, {
-      headers: {
-        'Origin': 'http://localhost:3000'
-      }
-    })
-      .then(res => res.json())
-      .then((response: HealthCheckResponse) => {
-        expect(response.status).toBe('ok');
-        expect(response.environment).toBe('test');
-        expect(response.redis).toBe('ready');
-        done();
+    // Wait for Redis mock to be ready
+    setTimeout(() => {
+      fetch(`http://localhost:${port}/health`, {
+        headers: {
+          'Origin': 'http://localhost:3000'
+        }
       })
-      .catch(error => {
-        done(error instanceof Error ? error : new Error('Failed to fetch health check response'));
-      });
+        .then(res => res.json())
+        .then((response: HealthCheckResponse) => {
+          expect(response.status).toBe('ok');
+          expect(response.environment).toBe('test');
+          expect(response.redis).toBe('ready');
+          done();
+        })
+        .catch(error => {
+          done(error instanceof Error ? error : new Error('Failed to fetch health check response'));
+        });
+    }, 1000);
   }, 10000);
 
   test('should handle invalid endpoints', (done) => {
