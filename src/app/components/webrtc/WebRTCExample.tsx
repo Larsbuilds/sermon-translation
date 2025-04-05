@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useWebRTC } from '@/lib/webrtc/useWebRTC';
+import { useWebRTC } from '@/lib/webrtc/useWebRTC.js';
 
 interface WebRTCExampleProps {
   sessionId: string;

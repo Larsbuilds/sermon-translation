@@ -8,19 +8,27 @@ import http from 'http';
 import Redis from 'ioredis';
 import { env } from './env.js';
 import rateLimit from 'express-rate-limit';
+import type { Redis as RedisType } from 'ioredis';
 
 // Get the directory name in ESM module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Create a dedicated standalone health server that starts immediately
-// This ensures Railway health checks pass even during app initialization
-(function startStandaloneHealthServer() {
-  const healthPort = parseInt(process.env.PORT || '8080') + 1;
-  console.log('Starting standalone health server on port', healthPort);
-  
+// Store server instances for cleanup
+let server: HttpServer | null = null;
+let healthServer: HttpServer | null = null;
+let backupHealthServer: HttpServer | null = null;
+
+// Create a dedicated standalone health server
+export const startStandaloneHealthServer = () => {
+  // Only start health server in production
+  if (process.env.NODE_ENV === 'test') {
+    console.log('Skipping health server in test environment');
+    return;
+  }
+
   try {
-    const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+    healthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
       console.log(`[Standalone Health Server] Request received: ${req.url}`);
       
       if (req.url === '/health' || req.url === '/') {
@@ -38,17 +46,50 @@ const __dirname = dirname(__filename);
       }
     });
     
-    server.listen(healthPort, '0.0.0.0', () => {
-      console.log(`Standalone health server running on 0.0.0.0:${healthPort}`);
+    // Listen on port 0 to let the OS assign a random port
+    healthServer.listen(0, 'localhost', () => {
+      const addr = healthServer?.address();
+      if (addr && typeof addr === 'object') {
+        console.log(`Standalone health server running on localhost:${addr.port}`);
+      }
     });
     
-    server.on('error', (err: NodeJS.ErrnoException) => {
+    healthServer.on('error', (err: NodeJS.ErrnoException) => {
       console.error('Failed to start standalone health server:', err);
+      
+      // Try backup port
+      backupHealthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+        if (req.url === '/health' || req.url === '/') {
+          const health = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            server: 'backup-health-server'
+          };
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(health));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      
+      // Listen on port 0 to let the OS assign a random port
+      backupHealthServer.listen(0, 'localhost', () => {
+        const addr = backupHealthServer?.address();
+        if (addr && typeof addr === 'object') {
+          console.log(`Backup health server running on localhost:${addr.port}`);
+        }
+      });
     });
   } catch (err: unknown) {
     console.error('Error creating standalone health server:', err);
   }
-})();
+};
+
+// Only start the health server if this is the main module
+if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
+  startStandaloneHealthServer();
+}
 
 // Load environment variables from .env.ws if it exists
 const envPath = resolve(__dirname, '../../.env.ws');
@@ -66,10 +107,10 @@ if (existsSync(envPath)) {
 }
 
 // Initialize Redis client with retry strategy
-let redisClient: Redis | null = null;
+let redisClient: RedisType | null = null;
 let redisStatus = 'not_initialized';
 
-export const getRedis = () => {
+export const getRedis = (): RedisType | null => {
   if (!redisClient) {
     console.log('===== REDIS CONNECTION DETAILS =====');
     console.log('Initializing Redis connection to:', env.REDIS_URL);
@@ -80,18 +121,20 @@ export const getRedis = () => {
       // Check if we're using the Railway internal network
       const isRailwayInternal = env.REDIS_URL.includes('.railway.internal');
       
+      const redisOptions = {
+        maxRetriesPerRequest: 3,
+        connectTimeout: 10000,
+        retryStrategy(times: number) {
+          const delay = Math.min(times * 100, 3000);
+          console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
+          return delay;
+        }
+      };
+      
       if (isRailwayInternal) {
         console.log('Using Railway internal networking for Redis connection');
         // When using Railway internal DNS, use the URL directly
-        redisClient = new Redis(env.REDIS_URL, {
-          maxRetriesPerRequest: 3,
-          connectTimeout: 10000,
-          retryStrategy(times: number) {
-            const delay = Math.min(times * 100, 3000);
-            console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
-            return delay;
-          }
-        });
+        redisClient = new Redis(env.REDIS_URL, redisOptions);
       } else {
         // For local development or when using explicit host/port
         console.log('Using direct Redis connection (localhost or custom)');
@@ -105,64 +148,45 @@ export const getRedis = () => {
           port: parseInt(redisUrl.port || '6379'),
           password: env.REDIS_PASSWORD,
           tls: env.REDIS_TLS ? {} : undefined,
-          maxRetriesPerRequest: 3,
-          connectTimeout: 10000,
-          retryStrategy(times: number) {
-            const delay = Math.min(times * 100, 3000);
-            console.log(`Redis connection retry ${times}, delaying ${delay}ms`);
-            return delay;
-          }
+          ...redisOptions
         });
       }
 
       console.log('Redis client created with configuration:', {
         url: env.REDIS_URL,
-        tls: env.REDIS_TLS ? 'enabled' : 'disabled'
+        tls: env.REDIS_TLS,
+        password: env.REDIS_PASSWORD ? 'set' : 'not set'
       });
 
-      redisClient.on('connect', () => {
-        console.log('===== REDIS CONNECTED =====');
-        redisStatus = 'connected';
-      });
+      if (redisClient) {
+        redisClient.on('connect', () => {
+          console.log('Redis client connected');
+          redisStatus = 'connected';
+        });
 
-      redisClient.on('error', (error) => {
-        console.error('===== REDIS ERROR =====');
-        console.error('Error details:', error);
-        console.error('Redis URL:', env.REDIS_URL);
-        console.error('Redis status was:', redisStatus);
-        redisStatus = 'error';
-      });
+        redisClient.on('ready', () => {
+          console.log('Redis client ready');
+          redisStatus = 'ready';
+        });
 
-      redisClient.on('ready', () => {
-        console.log('===== REDIS READY =====');
-        redisStatus = 'ready';
-        
-        // Test Redis functionality
-        if (redisClient) {
-          redisClient.set('health_test', 'ok', 'EX', 60)
-            .then(() => console.log('Successfully set test key in Redis'))
-            .catch(err => console.error('Failed to set test key in Redis:', err));
-            
-          redisClient.get('health_test')
-            .then(val => console.log('Test key value:', val))
-            .catch(err => console.error('Failed to get test key from Redis:', err));
-        }
-      });
+        redisClient.on('error', (error: Error) => {
+          console.error('Redis client error:', error);
+          redisStatus = 'error';
+        });
 
-      redisClient.on('close', () => {
-        console.log('===== REDIS CONNECTION CLOSED =====');
-        redisStatus = 'closed';
-      });
+        redisClient.on('close', () => {
+          console.log('Redis client closed');
+          redisStatus = 'closed';
+        });
 
-      redisClient.on('reconnecting', () => {
-        console.log('===== REDIS RECONNECTING =====');
-        redisStatus = 'reconnecting';
-      });
+        redisClient.on('reconnecting', () => {
+          console.log('Redis client reconnecting...');
+          redisStatus = 'reconnecting';
+        });
+      }
     } catch (error) {
-      console.error('===== REDIS INITIALIZATION FAILED =====');
-      console.error('Error details:', error);
-      console.error('Redis URL:', env.REDIS_URL);
-      redisStatus = 'initialization_failed';
+      console.error('Error creating Redis client:', error);
+      redisStatus = 'error';
     }
   }
   return redisClient;
@@ -501,7 +525,19 @@ export const startServer = (server?: HttpServer) => {
   return wss;
 };
 
-// Cleanup function for tests
+// Error handler for server startup
+const handleServerError = (err: NodeJS.ErrnoException & { port?: number }) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${err.port || 'unknown'} is already in use`);
+    if (process.env.NODE_ENV !== 'test') {
+      process.exit(1);
+    }
+  } else {
+    console.error('Server error:', err);
+  }
+};
+
+// Export cleanup function
 export const cleanup = async () => {
   try {
     // Stop cleanup interval
@@ -521,8 +557,48 @@ export const cleanup = async () => {
       await redisClient.quit();
       redisClient = null;
     }
+
+    // Close WebSocket server
+    if (server) {
+      await new Promise<void>((resolve) => {
+        if (!server?.listening) {
+          resolve();
+          return;
+        }
+        server.close(() => resolve());
+      });
+      server = null;
+    }
+
+    // Close health server
+    if (healthServer) {
+      await new Promise<void>((resolve) => {
+        if (!healthServer?.listening) {
+          resolve();
+          return;
+        }
+        healthServer.close(() => resolve());
+      });
+      healthServer = null;
+    }
+
+    // Close backup health server
+    if (backupHealthServer) {
+      await new Promise<void>((resolve) => {
+        if (!backupHealthServer?.listening) {
+          resolve();
+          return;
+        }
+        backupHealthServer.close(() => resolve());
+      });
+      backupHealthServer = null;
+    }
+
+    // Wait for all Redis operations to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
   } catch (error) {
     console.error('Error during cleanup:', error);
+    throw error;
   }
 };
 
@@ -547,8 +623,6 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server if this is the main module
-// In ESM, import.meta.url will contain the URL of the current module
-// and will end with the current file when it's the main module
 if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
   console.log('===== STARTING MAIN WEBSOCKET SERVER MODULE =====');
   
@@ -565,56 +639,6 @@ if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
   console.log(`Using port: ${port}`);
   console.log(`Using host: ${host}`);
 
-  // Create a separate simple HTTP server just for health checks
-  console.log('Starting dedicated health check server...');
-  
-  // Use a very simple HTTP server for health checks that has no dependencies
-  const healthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
-    console.log(`[Health Server] Request received: ${req.url}`);
-    
-    if (req.url === '/health' || req.url === '/') {
-      const health = {
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        server: 'health-dedicated',
-        uptime: process.uptime()
-      };
-      
-      console.log('[Health Server] Sending 200 OK response');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(health));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-
-  // Start health server immediately and bind to all interfaces (0.0.0.0)
-  try {
-    const healthPort = port + 1;
-    console.log(`Starting health server on 0.0.0.0:${healthPort}...`);
-    
-    healthServer.listen(healthPort, '0.0.0.0', () => {
-      console.log(`Dedicated health check server running on 0.0.0.0:${healthPort}`);
-    });
-    
-    healthServer.on('error', (err: NodeJS.ErrnoException) => {
-      console.error('Failed to start health server:', err);
-      console.log('Starting a backup health server...');
-      
-      // Try one more time on a different port
-      try {
-        healthServer.listen(healthPort + 1, '0.0.0.0', () => {
-          console.log(`Backup health check server running on 0.0.0.0:${healthPort + 1}`);
-        });
-      } catch (backupErr) {
-        console.error('Failed to start backup health server:', backupErr);
-      }
-    });
-  } catch (err) {
-    console.error('Error starting health server:', err);
-  }
-  
   // Test Redis connection before starting WebSocket server
   const checkRedisAndStart = async () => {
     console.log('Testing Redis connection before starting WebSocket server...');
@@ -654,13 +678,7 @@ if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
         console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
         console.log('Environment:', process.env.NODE_ENV || 'development');
         console.log('Server is ready to accept connections');
-      }).on('error', (err: NodeJS.ErrnoException) => {
-        console.error('Failed to start server:', err);
-        if (err.code === 'EADDRINUSE') {
-          console.error(`Port ${port} is already in use. Check for other services using this port.`);
-        }
-        process.exit(1);
-      });
+      }).on('error', handleServerError);
     } catch (error) {
       console.error('Error during Redis check:', error);
       
@@ -677,13 +695,7 @@ if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
         console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
         console.log('Environment:', process.env.NODE_ENV || 'development');
         console.log('Server is ready to accept connections');
-      }).on('error', (err: NodeJS.ErrnoException) => {
-        console.error('Failed to start server:', err);
-        if (err.code === 'EADDRINUSE') {
-          console.error(`Port ${port} is already in use. Check for other services using this port.`);
-        }
-        process.exit(1);
-      });
+      }).on('error', handleServerError);
     }
   };
   

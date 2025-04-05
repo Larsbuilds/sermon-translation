@@ -10,6 +10,12 @@ const nextConfig = {
     NEXT_PUBLIC_WEBSOCKET_URL: process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:3002',
     NEXT_PUBLIC_WEBRTC_URL: process.env.NEXT_PUBLIC_WEBRTC_URL || 'ws://localhost:3002/webrtc',
   },
+  experimental: {
+    esmExternals: true,
+  },
+  typescript: {
+    ignoreBuildErrors: false,
+  },
 };
 
 export default nextConfig;

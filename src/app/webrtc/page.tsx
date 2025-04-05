@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { WebRTCExample } from '@/components/WebRTCExample';
+import { WebRTCExample } from '@/app/components/webrtc/WebRTCExample.js';
 
 export default function WebRTCPage() {
   const [sessionId] = useState(() => `session-${Math.random().toString(36).substring(7)}`);
