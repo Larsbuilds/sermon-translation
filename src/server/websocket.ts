@@ -1,16 +1,16 @@
-import { WebSocketServer, WebSocket as WS } from 'ws';
-import { Server as HttpServer, IncomingMessage, ServerResponse, createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer, Server as HttpServer, IncomingMessage, ServerResponse } from 'http';
 import { config } from 'dotenv';
 import { dirname, resolve } from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import http from 'http';
-import Redis from 'ioredis';
-import { env } from './env.js';
+import Redis, { Redis as RedisClient } from 'ioredis';
 import rateLimit from 'express-rate-limit';
-import type { Redis as RedisType } from 'ioredis';
+import { parse } from 'url';
+import { Socket } from 'net';
+import { env } from './env.ts';
 
-// Get the directory name in ESM module
+// Get the directory name
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -19,23 +19,78 @@ let server: HttpServer | null = null;
 let healthServer: HttpServer | null = null;
 let backupHealthServer: HttpServer | null = null;
 
+// Store active connections
+const connections = new Map<string, Map<string, ExtendedWebSocket>>();
+
+// Define WebSocket close codes
+const CLOSE_CODES = {
+  NORMAL: 1000,
+  GOING_AWAY: 1001,
+  PROTOCOL_ERROR: 1002,
+  UNSUPPORTED_DATA: 1003,
+  NO_STATUS_RECEIVED: 1005,
+  ABNORMAL_CLOSURE: 1006,
+  INVALID_FRAME_PAYLOAD_DATA: 1007,
+  POLICY_VIOLATION: 1008,
+  MESSAGE_TOO_BIG: 1009,
+  MANDATORY_EXTENSION: 1010,
+  INTERNAL_ERROR: 1011,
+  SERVICE_RESTART: 1012,
+  TRY_AGAIN_LATER: 1013,
+  BAD_GATEWAY: 1014,
+  TLS_HANDSHAKE: 1015,
+} as const;
+
+// Extend WebSocket type
+interface ExtendedWebSocket extends WebSocket {
+  sessionId?: string;
+  deviceId?: string;
+  lastActivity?: number;
+}
+
+// Broadcast message to all clients in a session except the sender
+const broadcastToSession = (sessionId: string, senderDeviceId: string, message: any) => {
+  const sessionConnections = connections.get(sessionId);
+  if (!sessionConnections) {
+    console.warn(`[WS] Broadcast failed - Session ${sessionId} not found`);
+    return;
+  }
+
+  console.log(`[WS] Broadcasting message in session ${sessionId}`, {
+    sender: senderDeviceId,
+    recipients: sessionConnections.size - 1,
+    messageType: message.type,
+    timestamp: new Date().toISOString()
+  });
+
+  for (const [deviceId, ws] of sessionConnections) {
+    if (deviceId !== senderDeviceId && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify(message));
+        console.log(`[WS] Message sent to ${deviceId} in session ${sessionId}`);
+      } catch (error) {
+        console.error(`[WS] Failed to send message to ${deviceId}:`, error);
+      }
+    }
+  }
+};
+
 // Create a dedicated standalone health server
 export const startStandaloneHealthServer = () => {
   // Only start health server in production
   if (process.env.NODE_ENV === 'test') {
-    console.log('Skipping health server in test environment');
     return;
   }
 
   try {
-    healthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+    healthServer = createServer((req: IncomingMessage, res: ServerResponse) => {
       console.log(`[Standalone Health Server] Request received: ${req.url}`);
       
       if (req.url === '/health' || req.url === '/') {
         const health = {
           status: 'ok',
-          timestamp: new Date().toISOString(),
-          server: 'standalone-health-server'
+          environment: process.env.NODE_ENV || 'development',
+          redis: 'connected',
         };
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -46,25 +101,18 @@ export const startStandaloneHealthServer = () => {
       }
     });
     
-    // Listen on port 0 to let the OS assign a random port
-    healthServer.listen(0, 'localhost', () => {
-      const addr = healthServer?.address();
-      if (addr && typeof addr === 'object') {
-        console.log(`Standalone health server running on localhost:${addr.port}`);
-      }
-    });
-    
     healthServer.on('error', (err: NodeJS.ErrnoException) => {
       console.error('Failed to start standalone health server:', err);
       
       // Try backup port
-      backupHealthServer = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+      backupHealthServer = createServer((req: IncomingMessage, res: ServerResponse) => {
         if (req.url === '/health' || req.url === '/') {
           const health = {
             status: 'ok',
-            timestamp: new Date().toISOString(),
-            server: 'backup-health-server'
+            environment: process.env.NODE_ENV || 'development',
+            redis: 'connected',
           };
+          
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(health));
         } else {
@@ -73,44 +121,237 @@ export const startStandaloneHealthServer = () => {
         }
       });
       
-      // Listen on port 0 to let the OS assign a random port
-      backupHealthServer.listen(0, 'localhost', () => {
-        const addr = backupHealthServer?.address();
-        if (addr && typeof addr === 'object') {
-          console.log(`Backup health server running on localhost:${addr.port}`);
-        }
+      backupHealthServer.listen(8081, () => {
+        console.log('Backup health server listening on port 8081');
       });
+    });
+    
+    healthServer.listen(8080, () => {
+      console.log('Health server listening on port 8080');
     });
   } catch (err: unknown) {
     console.error('Error creating standalone health server:', err);
   }
 };
 
-// Only start the health server if this is the main module
-if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
-  startStandaloneHealthServer();
-}
+// Start the WebSocket server
+const startServer = () => {
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    console.log(`[HTTP] ${req.method} request to ${req.url}`);
+    if (req.url === '/health') {
+      const health = {
+        status: 'degraded',
+        environment: process.env.NODE_ENV || 'development',
+        redis: 'reconnecting',
+      };
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(health));
+      console.log('[HTTP] Health check response sent');
+    } else {
+      res.writeHead(404);
+      res.end();
+      console.log('[HTTP] 404 response sent');
+    }
+  });
 
-// Load environment variables from .env.ws if it exists
-const envPath = resolve(__dirname, '../../.env.ws');
-if (existsSync(envPath)) {
-  config({ path: envPath });
-  console.log('Loaded environment variables from .env.ws');
-} else {
-  console.log('No .env.ws file found, using default environment variables');
-  // Set default values for required environment variables
-  // Don't set WS_PORT if it's already set by Railway as PORT
-  if (!process.env.PORT) {
-    process.env.WS_PORT = process.env.WS_PORT || '8080';
+  const wss = new WebSocketServer({ noServer: true });
+
+  // Handle upgrade requests
+  server.on('upgrade', (request: IncomingMessage, socket: Socket, head: Buffer) => {
+    const { pathname, query } = parse(request.url || '', true);
+    const origin = request.headers.origin;
+    console.log(`[WS] Upgrade request from ${origin} for path ${pathname}`);
+
+    // Check CORS
+    if (origin && !process.env.ALLOWED_ORIGINS?.split(',').includes(origin)) {
+      console.warn(`[WS] CORS check failed for origin: ${origin}`);
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Only handle /webrtc path
+    if (pathname?.split('?')[0] !== '/webrtc') {
+      console.warn(`[WS] Invalid path requested: ${pathname}`);
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Check required parameters
+    const params = query as { sessionId?: string; deviceId?: string; isMain?: string };
+    const sessionId = params.sessionId;
+    const deviceId = params.deviceId;
+    const isMain = params.isMain === 'true';
+
+    console.log(`[WS] Connection attempt - Session: ${sessionId}, Device: ${deviceId}, Main: ${isMain}`);
+
+    if (!sessionId || !deviceId) {
+      console.warn('[WS] Missing required parameters');
+      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Check connection limit
+    const sessionConnections = connections.get(sessionId) || new Map<string, ExtendedWebSocket>();
+    if (sessionConnections.size >= (Number(process.env.MAX_CONNECTIONS_PER_SESSION) || 3)) {
+      console.warn(`[WS] Connection limit reached for session ${sessionId}`);
+      socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Accept the upgrade
+    wss.handleUpgrade(request, socket, head, (ws: ExtendedWebSocket) => {
+      console.log(`[WS] Connection established - Session: ${sessionId}, Device: ${deviceId}`);
+      ws.sessionId = sessionId;
+      ws.deviceId = deviceId;
+      ws.lastActivity = Date.now();
+      
+      // Initialize session connections if not exists
+      if (!connections.has(sessionId)) {
+        connections.set(sessionId, new Map());
+        console.log(`[WS] New session created: ${sessionId}`);
+      }
+      const sessionConnections = connections.get(sessionId)!;
+      sessionConnections.set(deviceId, ws);
+      console.log(`[WS] Active connections in session ${sessionId}: ${sessionConnections.size}`);
+
+      // Handle messages
+      ws.on('message', (message: Buffer) => {
+        try {
+          const data = JSON.parse(message.toString());
+          ws.lastActivity = Date.now();
+          console.log(`[WS] Message received from ${deviceId} in session ${sessionId}:`, {
+            type: data.type,
+            size: message.length,
+            timestamp: new Date().toISOString()
+          });
+          broadcastToSession(sessionId, deviceId, data);
+        } catch (error) {
+          console.error(`[WS] Error handling message from ${deviceId}:`, error);
+          ws.close(CLOSE_CODES.INVALID_FRAME_PAYLOAD_DATA);
+        }
+      });
+
+      // Handle close
+      ws.on('close', (code: number, reason: string) => {
+        console.log(`[WS] Connection closed - Session: ${sessionId}, Device: ${deviceId}`, {
+          code,
+          reason: reason.toString(),
+          timestamp: new Date().toISOString()
+        });
+        const sessionConnections = connections.get(sessionId);
+        if (sessionConnections) {
+          sessionConnections.delete(deviceId);
+          console.log(`[WS] Device ${deviceId} removed from session ${sessionId}`);
+          if (sessionConnections.size === 0) {
+            connections.delete(sessionId);
+            console.log(`[WS] Session ${sessionId} deleted (no active connections)`);
+          }
+        }
+      });
+
+      // Handle errors
+      ws.on('error', (error: Error) => {
+        console.error(`[WS] WebSocket error for ${deviceId} in session ${sessionId}:`, {
+          error: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString()
+        });
+        ws.close(CLOSE_CODES.INTERNAL_ERROR);
+      });
+
+      wss.emit('connection', ws);
+    });
+  });
+
+  return server;
+};
+
+// Cleanup function to close all connections and servers
+const cleanup = async () => {
+  // Close all WebSocket connections
+  for (const [sessionId, sessionConnections] of connections) {
+    for (const [deviceId, ws] of sessionConnections) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(CLOSE_CODES.GOING_AWAY, 'Server shutting down');
+      }
+    }
+    connections.delete(sessionId);
   }
-  process.env.WS_HOST = process.env.WS_HOST || '0.0.0.0';
+
+  // Close Redis client if it exists
+  if (redisClient) {
+    try {
+      await redisClient.quit();
+    } catch (error) {
+      console.error('Error closing Redis client:', error);
+    }
+  }
+
+  // Helper function to close a server
+  const closeServer = (server: HttpServer | null) => {
+    if (server) {
+      return new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+        // Force close any remaining connections after 5 seconds
+        setTimeout(() => {
+          server.closeAllConnections();
+          resolve();
+        }, 5000);
+      });
+    }
+    return Promise.resolve();
+  };
+
+  // Close all servers
+  await Promise.all([
+    closeServer(server),
+    closeServer(healthServer),
+    closeServer(backupHealthServer),
+  ]);
+
+  // Wait for all operations to complete
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+};
+
+// Export the server and cleanup function for testing
+export { startServer, cleanup };
+
+// Start the server if this is the main module
+if (import.meta.url === import.meta.url) {
+  const port = env.WS_PORT || 3002;
+  const host = env.WS_HOST || 'localhost';
+
+  const server = startServer();
+  server.listen(port, host, () => {
+    console.log(`WebSocket server is running on ws://${host}:${port}`);
+  });
+
+  // Handle graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM signal received. Cleaning up...');
+    await cleanup();
+    process.exit(0);
+  });
+
+  process.on('SIGINT', async () => {
+    console.log('SIGINT signal received. Cleaning up...');
+    await cleanup();
+    process.exit(0);
+  });
 }
 
 // Initialize Redis client with retry strategy
-let redisClient: RedisType | null = null;
+let redisClient: RedisClient | null = null;
 let redisStatus = 'not_initialized';
 
-export const getRedis = (): RedisType | null => {
+export const getRedis = (): RedisClient | null => {
   if (!redisClient) {
     console.log('===== REDIS CONNECTION DETAILS =====');
     console.log('Initializing Redis connection to:', env.REDIS_URL);
@@ -134,7 +375,7 @@ export const getRedis = (): RedisType | null => {
       if (isRailwayInternal) {
         console.log('Using Railway internal networking for Redis connection');
         // When using Railway internal DNS, use the URL directly
-        redisClient = new Redis(env.REDIS_URL, redisOptions);
+        redisClient = new Redis.default(env.REDIS_URL, redisOptions);
       } else {
         // For local development or when using explicit host/port
         console.log('Using direct Redis connection (localhost or custom)');
@@ -143,7 +384,7 @@ export const getRedis = (): RedisType | null => {
         
         // Force localhost connection with explicit port instead of using URI
         // This avoids potential DNS resolution issues inside the container
-        redisClient = new Redis({
+        redisClient = new Redis.default({
           host: redisUrl.hostname,
           port: parseInt(redisUrl.port || '6379'),
           password: env.REDIS_PASSWORD,
@@ -220,7 +461,7 @@ const startCleanupInterval = () => {
     for (const [sessionId, sessionConnections] of connections) {
       for (const [deviceId, ws] of sessionConnections) {
         if (ws.lastActivity && now - ws.lastActivity > 30000) {
-          ws.close();
+          ws.terminate();
           sessionConnections.delete(deviceId);
         }
       }
@@ -248,282 +489,9 @@ const rateLimiter = rateLimit({
   max: 100 // limit each IP to 100 requests per windowMs
 });
 
-const wss = new WebSocketServer({ noServer: true });
-
-// Extend WebSocket type
-interface ExtendedWebSocket extends WS {
-  sessionId?: string;
-  deviceId?: string;
-  isMain?: boolean;
-  lastActivity?: number;
-}
-
-// Store active connections
-const connections = new Map<string, Map<string, ExtendedWebSocket>>();
-
 // Redis key prefixes
 const SESSION_PREFIX = 'ws:session:';
 const CONNECTION_PREFIX = 'ws:connection:';
-
-// WebRTC Types for Node.js environment
-interface RTCSessionDescriptionInit {
-  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
-  sdp: string;
-}
-
-interface RTCIceCandidateInit {
-  candidate: string;
-  sdpMid?: string | null;
-  sdpMLineIndex?: number | null;
-  usernameFragment?: string | null;
-}
-
-interface WebRTCMessage {
-  type: 'offer' | 'answer' | 'ice-candidate';
-  offer?: RTCSessionDescriptionInit;
-  answer?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
-}
-
-wss.on('connection', async (ws: ExtendedWebSocket, req) => {
-  const url = new URL(req.url || '', `http://${req.headers.host}`);
-  const sessionId = url.searchParams.get('sessionId');
-  const deviceId = url.searchParams.get('deviceId');
-  const isMain = url.searchParams.get('isMain') === 'true';
-  const clientIp = req.socket.remoteAddress;
-
-  console.log('New WebSocket connection:', {
-    sessionId,
-    deviceId,
-    isMain,
-    clientIp,
-    path: url.pathname
-  });
-
-  if (!sessionId || !deviceId) {
-    console.error('Missing required parameters:', { sessionId, deviceId });
-    ws.close(4000, 'Missing required parameters');
-    return;
-  }
-
-  // Check max connections per session
-  const sessionConnections = connections.get(sessionId);
-  if (sessionConnections && sessionConnections.size >= env.MAX_CONNECTIONS_PER_SESSION) {
-    ws.close(4001, 'Maximum connections reached for session');
-    return;
-  }
-
-  // Add connection to session
-  if (!connections.has(sessionId)) {
-    connections.set(sessionId, new Map());
-  }
-  connections.get(sessionId)?.set(deviceId, ws);
-
-  // Store connection info
-  ws.sessionId = sessionId;
-  ws.deviceId = deviceId;
-  ws.isMain = isMain;
-  ws.lastActivity = Date.now();
-
-  // Store session in Redis
-  await safeRedisOp(async () => {
-    const client = getRedis();
-    if (!client) return false;
-    
-    await client.sadd('sessions', sessionId);
-    await client.set(`ws:session:${sessionId}`, JSON.stringify({
-      createdAt: new Date().toISOString(),
-      lastActive: new Date().toISOString(),
-      clientIp,
-      isMain
-    }), 'EX', env.SESSION_TTL);
-    return true;
-  }, false);
-
-  // Handle messages
-  ws.on('message', async (data: Buffer) => {
-    try {
-      const message = JSON.parse(data.toString());
-      ws.lastActivity = Date.now();
-
-      if (env.ENABLE_REQUEST_LOGGING) {
-        console.log(`Received message in session ${sessionId} from device ${deviceId}:`, {
-          type: message.type,
-          dataSize: data.length
-        });
-      }
-
-      // Update session TTL in Redis
-      await safeRedisOp(async () => {
-        const client = getRedis();
-        if (!client) return false;
-        
-        await client.expire(`ws:session:${sessionId}`, env.SESSION_TTL);
-        return true;
-      }, false);
-
-      // Broadcast message to other clients in session
-      const sessionConnections = connections.get(sessionId);
-      if (sessionConnections) {
-        for (const [targetId, client] of Array.from(sessionConnections.entries())) {
-          if (targetId !== deviceId && client.readyState === WS.OPEN) {
-            try {
-              client.send(JSON.stringify({
-                ...message,
-                from: deviceId
-              }));
-              if (env.ENABLE_REQUEST_LOGGING) {
-                console.log(`Broadcasted ${message.type} to device ${targetId}`);
-              }
-            } catch (error) {
-              console.error('Error sending message to client:', error);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error handling message:', error);
-    }
-  });
-
-  // Handle connection close
-  ws.on('close', async () => {
-    console.log(`Connection closed for device ${deviceId} in session ${sessionId}`);
-    const sessionConnections = connections.get(sessionId);
-    if (sessionConnections) {
-      sessionConnections.delete(deviceId);
-      if (sessionConnections.size === 0) {
-        connections.delete(sessionId);
-        // Remove session from Redis if no connections remain
-        await safeRedisOp(async () => {
-          const client = getRedis();
-          if (!client) return false;
-          
-          await client.del(`ws:session:${sessionId}`);
-          await client.srem('sessions', sessionId);
-          return true;
-        }, false);
-      }
-    }
-  });
-});
-
-// Initialize HTTP server
-let httpServer: HttpServer;
-
-export const startServer = (server?: HttpServer) => {
-  httpServer = server || createServer();
-  
-  const host = env.WS_HOST || '0.0.0.0'; // Default to 0.0.0.0 for container deployments
-  const port = env.WS_PORT || 8080; // WS_PORT is now a number, no need to parse
-
-  // Start cleanup interval
-  startCleanupInterval();
-  
-  // Handle WebSocket upgrade requests
-  httpServer.on('upgrade', (req: IncomingMessage, socket, head) => {
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-
-    // Health check endpoint
-    if (url.pathname === '/health') {
-      console.log('Health check requested via upgrade from:', req.socket.remoteAddress);
-      const health = {
-        status: redisStatus === 'ready' || redisStatus === 'connected' ? 'ok' : 'degraded',
-        timestamp: new Date().toISOString(),
-        connections: Array.from(connections.keys()).length,
-        redis: redisStatus,
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        port: process.env.PORT || 'not set',
-        ws_port: env.WS_PORT || 'not set',
-        host: req.headers.host,
-        pid: process.pid,
-        memory: process.memoryUsage()
-      };
-      console.log('Health check response via upgrade:', JSON.stringify(health));
-      const response = `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(health)}`;
-      socket.write(response);
-      socket.destroy();
-      return;
-    }
-
-    // WebSocket endpoints
-    if (url.pathname !== '/webrtc' && url.pathname !== '/ws') {
-      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-
-    // CORS check
-    const origin = req.headers.origin;
-    if (!origin || !env.ALLOWED_ORIGINS.split(',').includes(origin)) {
-      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-
-    // Rate limiting
-    if (env.NODE_ENV === 'production') {
-      try {
-        rateLimiter(req as any, {
-          end: () => {
-            socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
-            socket.destroy();
-          }
-        } as any as ServerResponse, () => {
-          wss.handleUpgrade(req, socket, head, (ws) => {
-            wss.emit('connection', ws, req);
-          });
-        });
-      } catch (error) {
-        console.error('Rate limiting error:', error);
-        socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
-        socket.destroy();
-      }
-    } else {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit('connection', ws, req);
-      });
-    }
-  });
-
-  // Handle HTTP requests
-  httpServer.on('request', (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-    
-    // Handle health check
-    if (url.pathname === '/health') {
-      console.log('Health check requested from:', req.socket.remoteAddress);
-      
-      // Always respond to health checks even if Redis is not connected
-      const health = {
-        status: redisStatus === 'ready' || redisStatus === 'connected' ? 'ok' : 'degraded',
-        timestamp: new Date().toISOString(),
-        connections: Array.from(connections.keys()).length,
-        redis: redisStatus,
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        port: process.env.PORT || 'not set',
-        ws_port: env.WS_PORT || 'not set',
-        host: req.headers.host,
-        pid: process.pid,
-        memory: process.memoryUsage()
-      };
-      console.log('Health check response:', JSON.stringify(health));
-      
-      // Always return 200 for health checks to prevent Railway from restarting
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(health));
-      return;
-    }
-
-    // Handle all other requests
-    res.writeHead(404);
-    res.end();
-  });
-
-  return wss;
-};
 
 // Error handler for server startup
 const handleServerError = (err: NodeJS.ErrnoException & { port?: number }) => {
@@ -536,169 +504,3 @@ const handleServerError = (err: NodeJS.ErrnoException & { port?: number }) => {
     console.error('Server error:', err);
   }
 };
-
-// Export cleanup function
-export const cleanup = async () => {
-  try {
-    // Stop cleanup interval
-    stopCleanupInterval();
-
-    // Close all WebSocket connections
-    for (const [sessionId, sessionConnections] of connections) {
-      for (const [deviceId, ws] of sessionConnections) {
-        ws.close();
-      }
-      sessionConnections.clear();
-    }
-    connections.clear();
-
-    // Close Redis connection if it exists
-    if (redisClient) {
-      await redisClient.quit();
-      redisClient = null;
-    }
-
-    // Close WebSocket server
-    if (server) {
-      await new Promise<void>((resolve) => {
-        if (!server?.listening) {
-          resolve();
-          return;
-        }
-        server.close(() => resolve());
-      });
-      server = null;
-    }
-
-    // Close health server
-    if (healthServer) {
-      await new Promise<void>((resolve) => {
-        if (!healthServer?.listening) {
-          resolve();
-          return;
-        }
-        healthServer.close(() => resolve());
-      });
-      healthServer = null;
-    }
-
-    // Close backup health server
-    if (backupHealthServer) {
-      await new Promise<void>((resolve) => {
-        if (!backupHealthServer?.listening) {
-          resolve();
-          return;
-        }
-        backupHealthServer.close(() => resolve());
-      });
-      backupHealthServer = null;
-    }
-
-    // Wait for all Redis operations to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
-  } catch (error) {
-    console.error('Error during cleanup:', error);
-    throw error;
-  }
-};
-
-// Handle process termination
-const shutdown = async () => {
-  console.log('Shutting down WebSocket server...');
-  await cleanup();
-  process.exit(0);
-};
-
-// Handle various termination signals
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-process.on('SIGUSR2', shutdown);
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  shutdown();
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  shutdown();
-});
-
-// Start server if this is the main module
-if (import.meta.url.endsWith(fileURLToPath(import.meta.url))) {
-  console.log('===== STARTING MAIN WEBSOCKET SERVER MODULE =====');
-  
-  // Create the HTTP server
-  const server = createServer();
-  
-  // Use Railway's PORT first, then WS_PORT if set, then default to 8080
-  const port = parseInt(process.env.PORT || '') || env.WS_PORT || 8080;
-  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
-  
-  console.log('Server configuration:');
-  console.log(`PORT env: ${process.env.PORT || 'not set'}`);
-  console.log(`WS_PORT env: ${env.WS_PORT || 'not set'}`);
-  console.log(`Using port: ${port}`);
-  console.log(`Using host: ${host}`);
-
-  // Test Redis connection before starting WebSocket server
-  const checkRedisAndStart = async () => {
-    console.log('Testing Redis connection before starting WebSocket server...');
-    try {
-      const client = getRedis();
-      
-      if (!client) {
-        console.error('Redis client could not be created. Starting WebSocket server anyway...');
-      } else {
-        console.log('Redis client created successfully.');
-        
-        // Try a simple operation to verify Redis is working
-        try {
-          console.log('Testing Redis SET operation...');
-          await client.set('startup_test', 'ok', 'EX', 60);
-          console.log('Redis SET operation successful');
-          
-          console.log('Testing Redis GET operation...');
-          const value = await client.get('startup_test');
-          console.log('Redis GET operation successful, value:', value);
-        } catch (redisOpError) {
-          console.error('Error testing Redis operations:', redisOpError);
-          console.log('Continuing with WebSocket server startup despite Redis operation errors');
-        }
-      }
-      
-      // Start WebSocket server regardless of Redis status
-      console.log('Starting WebSocket server...');
-      startServer(server);
-      
-      // Listen on configured port and host
-      server.listen(port, host, () => {
-        console.log(`WebSocket server is running on ${host}:${port}`);
-        console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-        console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-        console.log(`Health endpoint: http://${host}:${port}/health`);
-        console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
-        console.log('Environment:', process.env.NODE_ENV || 'development');
-        console.log('Server is ready to accept connections');
-      }).on('error', handleServerError);
-    } catch (error) {
-      console.error('Error during Redis check:', error);
-      
-      // Start WebSocket server despite Redis errors
-      console.log('Starting WebSocket server despite Redis errors...');
-      startServer(server);
-      
-      // Listen on configured port and host
-      server.listen(port, host, () => {
-        console.log(`WebSocket server is running on ${host}:${port}`);
-        console.log(`WebRTC endpoint: ws://${host}:${port}/webrtc`);
-        console.log(`WebSocket endpoint: ws://${host}:${port}/ws`);
-        console.log(`Health endpoint: http://${host}:${port}/health`);
-        console.log(`Dedicated health endpoint: http://${host}:${port + 1}/health`);
-        console.log('Environment:', process.env.NODE_ENV || 'development');
-        console.log('Server is ready to accept connections');
-      }).on('error', handleServerError);
-    }
-  };
-  
-  // Start the WebSocket server after checking Redis
-  checkRedisAndStart();
-} 
