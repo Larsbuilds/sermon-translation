@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { WebRTCSignaling } from './WebRTCSignaling.js';
+import { WebRTCSignaling } from './WebRTCSignaling';
 
 interface PeerConfig {
   signalingUrl: string;

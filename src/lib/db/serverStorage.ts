@@ -1,5 +1,5 @@
-import { Session as SessionModel } from './models/Session.js';
-import connectDB from './mongodb.js';
+import { Session as SessionModel } from './models/Session';
+import connectDB from './mongodb';
 
 class ServerStorage {
   private static instance: ServerStorage;

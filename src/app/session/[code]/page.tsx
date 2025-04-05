@@ -12,7 +12,7 @@ import { SessionSettings } from '@/app/components/session/SessionSettings';
 import { SessionTimeoutWarning } from '@/app/components/session/SessionTimeoutWarning';
 import { ConnectionStatus } from '@/app/components/session/ConnectionStatus';
 import { LoadingState } from '@/app/components/session/LoadingState';
-import { WebRTCExample } from '@/components/WebRTCExample';
+import { WebRTCExample } from '@/app/components/webrtc/WebRTCExample';
 
 export default function SessionPage() {
   const { code } = useParams();
